@@ -1,79 +1,108 @@
 # Da mandare a chi amministra il server
 
-Testo pronto da inoltrare. Sostituisci la chiave pubblica con la tua
-(`cat ~/.ssh/leggimenu_server.pub`) e il sottodominio se ne preferisci un altro.
+Stesso schema del centralino, che su quella macchina funziona già. Sostituisci
+la chiave con la tua (`cat ~/.ssh/leggimenu_tavolo.pub`).
 
 ---
 
 Ciao,
 
-sul server **65.21.93.36** (AlmaLinux 10, DirectAdmin) mi serve far girare una
-piccola applicazione Python per un prototipo. Consuma pochissimo — una
-cinquantina di MB di RAM — e non tocca niente di quello che c'è già.
+sul server **65.21.93.36** mi serve un secondo ambiente come quello del
+centralino, per un altro prototipo. Stessa impostazione, così non devi
+inventarti niente di nuovo.
 
-Ti chiedo quattro cose.
-
-## 1. Un utente limitato
+## 1. Utente in gabbia
 
 ```bash
-useradd -m -s /bin/bash leggimenu
-loginctl enable-linger leggimenu
+useradd -m -s /bin/bash tavolo
 ```
 
-Il `linger` serve perché l'applicazione giri come servizio di quell'utente
-senza bisogno di root: così non serve dargli nessun privilegio.
+Come `centralino`: confinato, senza root, senza possibilità di aprire tunnel,
+e che non veda gli altri domini.
 
-## 2. La chiave pubblica
+## 2. Chiave pubblica
 
 ```bash
-mkdir -p /home/leggimenu/.ssh && chmod 700 /home/leggimenu/.ssh
-echo 'INCOLLA_QUI_LA_CHIAVE_PUBBLICA' >> /home/leggimenu/.ssh/authorized_keys
-chmod 600 /home/leggimenu/.ssh/authorized_keys
-chown -R leggimenu:leggimenu /home/leggimenu/.ssh
+mkdir -p /home/tavolo/.ssh && chmod 700 /home/tavolo/.ssh
+echo 'INCOLLA_QUI_LA_CHIAVE' >> /home/tavolo/.ssh/authorized_keys
+chmod 600 /home/tavolo/.ssh/authorized_keys
+chown -R tavolo:tavolo /home/tavolo/.ssh
 ```
 
-Solo chiave, niente password.
+Solo chiave, niente password. È una chiave dedicata a questo progetto, diversa
+da quella del centralino.
 
-## 3. Una porta libera
+## 3. Ambiente Python
 
-L'applicazione ascolta su **127.0.0.1:8099**, solo in locale. Ho verificato che
-la 8099 è libera (la 8080 è di httpd). Da fuori non è raggiungibile: ci arriva
-solo nginx.
-
-## 4. Un sottodominio su nginx
-
-**tavolo.leggimenu.apserver.it**, che inoltri a `127.0.0.1:8099`.
-
-Dato che c'è DirectAdmin, immagino convenga crearlo dal pannello e aggiungere
-la configurazione personalizzata dove il pannello se l'aspetta — quella parte
-la lascio a te, che conosci l'impianto.
-
-Tre direttive però sono indispensabili, e se mancano il guasto non è evidente:
-
-```nginx
-location / {
-    proxy_pass http://127.0.0.1:8099;
-
-    # senza questi due, i WebSocket non passano e la pagina resta ferma
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-
-    # senza questo, l'applicazione crede che ogni visitatore arrivi dalla rete
-    # interna e gli mostra anche le pagine riservate
-    proxy_set_header X-Forwarded-For $remote_addr;
-    proxy_set_header Host $host;
-
-    # il dispositivo resta collegato per ore: il timeout standard lo taglierebbe
-    proxy_read_timeout 3600s;
-}
+```bash
+mkdir -p /home/tavolo/app && chown tavolo:tavolo /home/tavolo/app
+su - tavolo -c "python3 -m venv /home/tavolo/.venv"
 ```
 
-## Quello che faccio io
+I pacchetti li installo io da lì, non servono pacchetti di sistema.
 
-Dopo, da quell'utente e senza privilegi: cartella `/home/leggimenu/app`,
-ambiente Python, e un servizio utente che si riavvia da solo.
+## 4. Il servizio, in `/etc/systemd/system/tavolo.service`
 
-Niente root, niente pacchetti di sistema, niente modifiche a siti esistenti.
+Come per il centralino: lo crei tu una volta e poi non lo tocchiamo più. Io
+pubblico copiando i file e toccando `RICARICA`, e il servizio si ricambia i
+worker da solo.
+
+```ini
+[Unit]
+Description=leggimenu tavolo
+After=network.target
+
+[Service]
+User=tavolo
+WorkingDirectory=/home/tavolo/app
+Environment=RICARICA_ATTIVA=1
+Environment=RICARICA_FILE=/home/tavolo/app/RICARICA
+Environment=LEGGIMENU_SEGRETO=METTI_QUI_UN_SEGRETO
+ExecStart=/home/tavolo/.venv/bin/gunicorn \
+    --workers 1 \
+    --worker-class uvicorn.workers.UvicornWorker \
+    --bind 127.0.0.1:8099 \
+    --timeout 0 \
+    tools.radar_live:app
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Due cose su questo file, che se cambiate rompono tutto in modo poco evidente:
+
+**`--workers 1` deve restare 1.** L'applicazione tiene in memoria lo stato del
+tavolo e la connessione col dispositivo: con più worker ognuno avrebbe il suo
+stato e il dispositivo parlerebbe con uno solo. Non è un problema di carico —
+si tratta di un tavolo, non di un sito.
+
+**`--timeout 0`** perché il dispositivo resta collegato per ore: col timeout
+normale gunicorn lo considererebbe bloccato e lo ucciderebbe.
+
+Il segreto puoi generarlo con `openssl rand -hex 16` e passarmelo, oppure dirmi
+di sceglierlo io e te lo mando.
+
+## 5. Sottodominio
+
+**tavolo.leggimenu.it** (o quello che preferisci), che inoltri a
+`127.0.0.1:8099` — stesso meccanismo di `centralino.leggimenu.it`.
+
+Rispetto al centralino c'è una differenza che conta: questa applicazione usa i
+**WebSocket**, quindi il proxy deve lasciar passare l'upgrade del protocollo.
+Su Apache serve `mod_proxy_wstunnel` e una riga in più:
+
+```apache
+ProxyPreserveHost On
+RewriteEngine On
+RewriteCond %{HTTP:Upgrade} =websocket [NC]
+RewriteRule /(.*) ws://127.0.0.1:8099/$1 [P,L]
+ProxyPass        / http://127.0.0.1:8099/
+ProxyPassReverse / http://127.0.0.1:8099/
+```
+
+Se manca l'upgrade non si vede nessun errore: la pagina si apre e resta ferma
+per sempre.
 
 Grazie!

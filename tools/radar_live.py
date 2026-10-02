@@ -184,6 +184,44 @@ async def manda_a_tutti(msg: dict) -> None:
 # Quanti bersagli fissi il firmware sta scartando come arredamento.
 RE_FISSI = re.compile(r"\[fissi\]\s*ignorati=(\d+)\s+taratura=(\w+)(?:\s+tavolo=(\d+))?")
 
+def avvia_guardiano_ricarica():
+    """Sorveglia il file RICARICA e chiede a gunicorn di ricambiare i worker.
+
+    E' il modo in cui si pubblica senza root: si copiano i file con scp e si
+    tocca RICARICA. Il capo di gunicorn, ricevuto un SIGHUP, avvia worker nuovi
+    col codice nuovo e lascia finire quelli vecchi - niente interruzioni.
+
+    Attivo solo se RICARICA_ATTIVA=1, perche' in locale il processo padre e' la
+    shell e mandarle un SIGHUP la chiuderebbe.
+    """
+    if os.environ.get("RICARICA_ATTIVA") != "1":
+        return None
+
+    import signal
+    import threading
+
+    segnale = pathlib.Path(os.environ.get("RICARICA_FILE", "RICARICA")).resolve()
+    basta = threading.Event()
+
+    def guarda() -> None:
+        visto = segnale.stat().st_mtime if segnale.exists() else 0.0
+        while not basta.wait(2.0):
+            try:
+                ora = segnale.stat().st_mtime if segnale.exists() else 0.0
+            except OSError:
+                continue
+            if ora != visto:
+                visto = ora
+                print(f"[ricarica] {segnale.name} toccato: ricambio i worker",
+                      flush=True)
+                os.kill(os.getppid(), signal.SIGHUP)
+
+    t = threading.Thread(target=guarda, daemon=True, name="ricarica")
+    t.start()
+    print(f"[ricarica] sorveglio {segnale}", flush=True)
+    return basta
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     coda: asyncio.Queue = asyncio.Queue()
@@ -212,8 +250,11 @@ async def lifespan(app: FastAPI):
             await diffondi(msg)
 
     task = asyncio.create_task(pompa())
+    guardiano = avvia_guardiano_ricarica()
     yield
     task.cancel()
+    if guardiano:
+        guardiano.set()
 
 
 app = FastAPI(title="radar live", lifespan=lifespan)

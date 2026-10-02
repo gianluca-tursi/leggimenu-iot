@@ -15,3 +15,6 @@ pyserial>=3.5          # legge il nodo radar sulla porta USB. Serve QUI, sul Mac
 # Non servono per far funzionare il sistema.
 pillow>=10.0
 qrcode>=7.4
+
+# solo sul server: gunicorn fa da capo e ricambia i worker su SIGHUP
+gunicorn>=21.2
