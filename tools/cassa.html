@@ -222,7 +222,6 @@ function evento(m){
   if(m.evento==='aperto'){
     apertoDa = Date.now(); apertoOra = m.ora; coperti = m.coperti;
     segna('aperto', m.ts);
-    apriModale(m.coperti);
     titolo = 'Tavolo aperto';
     dettaglio = `${m.coperti} ${m.coperti===1?'coperto rilevato':'coperti rilevati'}`;
   } else if(m.evento==='coperti'){
@@ -246,7 +245,7 @@ function evento(m){
     titolo = 'Abbinamento proposto';
     dettaglio = `${m.nome} (${m.colore}) · ${m.quanto} — ${m.motivo}`;
   } else if(m.evento==='confermati'){
-    coperti = m.coperti; tavoloConfermato = true;
+    coperti = m.coperti; tavoloConfermato = true; chiudiModale();
     titolo = 'Coperti confermati in sala';
     dettaglio = `${m.coperti} ${m.coperti===1?'coperto':'coperti'}`;
   } else if(m.evento==='stato'){
@@ -403,11 +402,15 @@ q('scelte').onclick = e=>{
 };
 
 q('confermaApertura').onclick = async ()=>{
-  tavoloConfermato = true; chiudiModale();
+  chiudiModale();
   try{
-    await fetch('/api/coperti',{method:'POST',
+    const r = await fetch('/api/coperti',{method:'POST',
       headers:{'Content-Type':'application/json'}, body:JSON.stringify({n:scelto})});
-  }catch(e){}
+    const d = await r.json();
+    // Se il nodo non ha ricevuto, la finestra deve tornare: altrimenti il
+    // cameriere crede di aver confermato e il tavolo resta a uno.
+    if(!d.ok) apriModale(scelto);
+  }catch(e){ apriModale(scelto); }
 };
 
 q('annullaApertura').onclick = async ()=>{
@@ -426,6 +429,13 @@ function collega(){
   ws.onmessage = e=>{
     const m = JSON.parse(e.data);
     if(m.tipo === 'evento') evento(m);
+    else if(m.tipo === 'tavolo'){
+      // Lo stato comanda sulla finestra: cosi' funziona anche se apro la cassa
+      // a servizio iniziato o ricarico la pagina, quando l'evento e' passato.
+      tavoloConfermato = m.confermato;
+      if(m.aperto && !m.confermato) apriModale(m.coperti);
+      else chiudiModale();
+    }
     else if(m.tipo === 'ordine_stato'){
       ordineVivo = m.righe ? m : null;
       disegnaOrdine();

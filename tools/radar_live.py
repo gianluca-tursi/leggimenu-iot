@@ -183,6 +183,14 @@ ordine_corrente: dict = {}
 dispositivi: dict[str, dict] = {}
 
 
+def stato_tavolo() -> dict:
+    """Com'e' messo il tavolo adesso, per chi arriva a servizio iniziato."""
+    return {"tipo": "tavolo",
+            "aperto": bool(apertura),
+            "coperti": apertura[1] if len(apertura) > 1 else 0,
+            "confermato": confermato[0]}
+
+
 def riconosci(biscotto: str | None, ip: str, ua: str) -> tuple[str, bool]:
     """Restituisce (identita', e' la prima volta che lo vedo)."""
     if biscotto and biscotto in dispositivi:
@@ -212,6 +220,10 @@ def statistiche_scansioni() -> dict:
         "ogni": int(sum(intervalli) / len(intervalli)) if intervalli else 0,
     }
 apertura: list[float] = []         # quando si e' aperto il tavolo
+# I coperti li ha confermati qualcuno in sala? Serve come STATO e non come
+# evento: una cassa aperta a meta' servizio, o ricaricata, l'evento non lo
+# rivede piu' e non saprebbe se chiedere conferma o no.
+confermato: list[bool] = [False]
 
 
 def registra_evento(tipo: str, **dati) -> dict:
@@ -567,6 +579,8 @@ async def libera():
         eventi.clear()                 # servizio chiuso: la cassa riparte pulita
         dispositivi.clear()
         apertura.clear()
+        confermato[0] = False
+        await manda_a_tutti(stato_tavolo())
         return {"ok": True}
     except Exception as e:
         return {"ok": False, "motivo": str(e)}
@@ -747,7 +761,9 @@ async def coperti(dati: dict):
         apertura[1] = n
     else:
         apertura[:] = [time.time(), n]
+    confermato[0] = True
     await manda_a_tutti(registra_evento("confermati", coperti=n))
+    await manda_a_tutti(stato_tavolo())
     if seriale_aperta:
         try:
             seriale_aperta[0].write(f"K:{n}\n".encode())
@@ -863,6 +879,7 @@ async def diffondi_o_accoda(msg: dict) -> None:
         else:
             apertura[1] = n
         await diffondi(registra_evento("aperto" if primo else "coperti", coperti=n))
+        await diffondi(stato_tavolo())
         return
     await diffondi(msg)
 
@@ -875,6 +892,7 @@ async def ws(sock: WebSocket) -> None:
         await sock.send_json({"tipo": "pausa", "secondi": ultima_pausa[0]})
     for ev in eventi:                    # ...e tutto quello che e' gia' successo
         await sock.send_json(ev)
+    await sock.send_json(stato_tavolo())
     if ordine_corrente:
         await sock.send_json({"tipo": "ordine_stato", **ordine_corrente})
     try:
