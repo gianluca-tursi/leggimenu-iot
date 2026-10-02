@@ -1,51 +1,43 @@
 # Da mandare a chi amministra il server
 
-Stesso schema del centralino, che su quella macchina funziona già. Sostituisci
-la chiave con la tua (`cat ~/.ssh/leggimenu_tavolo.pub`).
+L'ambiente c'e' gia': utente `centralino`, dominio `iot.leggimenu.it`, chiave
+installata. L'applicazione e' copiata in `~/app-tavolo`, gira e risponde su
+`127.0.0.1:8099`. Mancano due cose, entrambe da root.
 
 ---
 
 Ciao,
 
-sul server **65.21.93.36** mi serve un secondo ambiente come quello del
-centralino, per un altro prototipo. Stessa impostazione, così non devi
-inventarti niente di nuovo.
+l'applicazione del prototipo e' pronta in `/home/centralino/app-tavolo` e
+risponde gia' su `127.0.0.1:8099` (verificato: `curl` da dentro restituisce
+200). Mi servono due cose che da utente non posso fare.
 
-## 1. Utente in gabbia
+## 1. L'inoltro da iot.leggimenu.it
 
-```bash
-useradd -m -s /bin/bash tavolo
+Oggi quel dominio serve la pagina segnaposto da `public_html`. Va inoltrato
+all'applicazione, come fai per `centralino.leggimenu.it` verso la 8000, ma
+verso la **8099**.
+
+C'e' una differenza rispetto al centralino che conta: questa applicazione usa i
+**WebSocket**, quindi serve `mod_proxy_wstunnel` e la regola per l'upgrade.
+
+```apache
+ProxyPreserveHost On
+RewriteEngine On
+RewriteCond %{HTTP:Upgrade} =websocket [NC]
+RewriteRule /(.*) ws://127.0.0.1:8099/$1 [P,L]
+ProxyPass        / http://127.0.0.1:8099/
+ProxyPassReverse / http://127.0.0.1:8099/
+ProxyTimeout 3600
 ```
 
-Come `centralino`: confinato, senza root, senza possibilità di aprire tunnel,
-e che non veda gli altri domini.
+Se l'upgrade non passa non si vede nessun errore: la pagina si apre e resta
+ferma per sempre. E `ProxyTimeout` lungo perche' il dispositivo resta collegato
+per ore.
 
-## 2. Chiave pubblica
+## 2. Il servizio, come per il centralino
 
-```bash
-mkdir -p /home/tavolo/.ssh && chmod 700 /home/tavolo/.ssh
-echo 'INCOLLA_QUI_LA_CHIAVE' >> /home/tavolo/.ssh/authorized_keys
-chmod 600 /home/tavolo/.ssh/authorized_keys
-chown -R tavolo:tavolo /home/tavolo/.ssh
-```
-
-Solo chiave, niente password. È una chiave dedicata a questo progetto, diversa
-da quella del centralino.
-
-## 3. Ambiente Python
-
-```bash
-mkdir -p /home/tavolo/app && chown tavolo:tavolo /home/tavolo/app
-su - tavolo -c "python3 -m venv /home/tavolo/.venv"
-```
-
-I pacchetti li installo io da lì, non servono pacchetti di sistema.
-
-## 4. Il servizio, in `/etc/systemd/system/tavolo.service`
-
-Come per il centralino: lo crei tu una volta e poi non lo tocchiamo più. Io
-pubblico copiando i file e toccando `RICARICA`, e il servizio si ricambia i
-worker da solo.
+In `/etc/systemd/system/tavolo.service`:
 
 ```ini
 [Unit]
@@ -53,12 +45,14 @@ Description=leggimenu tavolo
 After=network.target
 
 [Service]
-User=tavolo
-WorkingDirectory=/home/tavolo/app
+User=centralino
+WorkingDirectory=/home/centralino/app-tavolo
+Environment=PORTA=8099
+Environment=ASCOLTA=127.0.0.1
 Environment=RICARICA_ATTIVA=1
-Environment=RICARICA_FILE=/home/tavolo/app/RICARICA
-Environment=LEGGIMENU_SEGRETO=METTI_QUI_UN_SEGRETO
-ExecStart=/home/tavolo/.venv/bin/gunicorn \
+Environment=RICARICA_FILE=/home/centralino/app-tavolo/RICARICA
+Environment=LEGGIMENU_SEGRETO=d4ead05485c7314566aa66379a7692d2
+ExecStart=/home/centralino/app-tavolo/.venv/bin/gunicorn \
     --workers 1 \
     --worker-class uvicorn.workers.UvicornWorker \
     --bind 127.0.0.1:8099 \
@@ -71,38 +65,23 @@ RestartSec=3
 WantedBy=multi-user.target
 ```
 
-Due cose su questo file, che se cambiate rompono tutto in modo poco evidente:
-
-**`--workers 1` deve restare 1.** L'applicazione tiene in memoria lo stato del
-tavolo e la connessione col dispositivo: con più worker ognuno avrebbe il suo
-stato e il dispositivo parlerebbe con uno solo. Non è un problema di carico —
-si tratta di un tavolo, non di un sito.
-
-**`--timeout 0`** perché il dispositivo resta collegato per ore: col timeout
-normale gunicorn lo considererebbe bloccato e lo ucciderebbe.
-
-Il segreto puoi generarlo con `openssl rand -hex 16` e passarmelo, oppure dirmi
-di sceglierlo io e te lo mando.
-
-## 5. Sottodominio
-
-**tavolo.leggimenu.it** (o quello che preferisci), che inoltri a
-`127.0.0.1:8099` — stesso meccanismo di `centralino.leggimenu.it`.
-
-Rispetto al centralino c'è una differenza che conta: questa applicazione usa i
-**WebSocket**, quindi il proxy deve lasciar passare l'upgrade del protocollo.
-Su Apache serve `mod_proxy_wstunnel` e una riga in più:
-
-```apache
-ProxyPreserveHost On
-RewriteEngine On
-RewriteCond %{HTTP:Upgrade} =websocket [NC]
-RewriteRule /(.*) ws://127.0.0.1:8099/$1 [P,L]
-ProxyPass        / http://127.0.0.1:8099/
-ProxyPassReverse / http://127.0.0.1:8099/
+```bash
+systemctl daemon-reload && systemctl enable --now tavolo
 ```
 
-Se manca l'upgrade non si vede nessun errore: la pagina si apre e resta ferma
-per sempre.
+Tre righe di quel file, se cambiate, rompono tutto in modo poco evidente:
+
+- **`--workers 1` deve restare 1.** L'applicazione tiene in memoria lo stato del
+  tavolo e la connessione col dispositivo: con piu' worker ognuno avrebbe il suo
+  stato e il dispositivo parlerebbe con uno solo. Non e' una questione di carico,
+  si tratta di un tavolo.
+- **`--timeout 0`** perche' il dispositivo resta collegato per ore: col timeout
+  normale gunicorn lo crederebbe bloccato e lo ucciderebbe.
+- **`ASCOLTA=127.0.0.1`** perche' altrimenti si arriva alla 8099 anche in
+  diretta, saltando il proxy, e l'applicazione mostrerebbe a chiunque le pagine
+  riservate alla sala.
+
+Da li' in poi pubblico da solo: copio i file e tocco `RICARICA`, e gunicorn
+ricambia i worker. Niente root, come per il centralino.
 
 Grazie!
