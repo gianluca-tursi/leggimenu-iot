@@ -127,7 +127,42 @@ eventi: list[dict] = []
 # l'unica cosa che fa agire qualcuno.
 STATI = ["inviato", "preparazione", "servito", "conto"]
 ordine_corrente: dict = {}
-dispositivi: set[str] = set()      # chi ha inquadrato il QR, in questa sessione
+# Chi ha inquadrato il QR, in questa sessione. Il biscotto da solo non basta:
+# la fotocamera di iOS apre il link in una finestra che spesso non lo conserva,
+# e lo stesso telefono veniva contato una volta per scansione. Quindi riconosco
+# l'apparecchio anche da indirizzo di rete + modello di browser, e il biscotto
+# serve a distinguere due telefoni identici sulla stessa rete.
+dispositivi: dict[str, dict] = {}
+
+
+def riconosci(biscotto: str | None, ip: str, ua: str) -> tuple[str, bool]:
+    """Restituisce (identita', e' la prima volta che lo vedo)."""
+    if biscotto and biscotto in dispositivi:
+        return biscotto, False
+    for chiave, d in dispositivi.items():
+        if d["ip"] == ip and d["ua"] == ua:
+            return chiave, False
+    chiave = biscotto or uuid.uuid4().hex[:8]
+    dispositivi[chiave] = {"ip": ip, "ua": ua, "ts": []}
+    return chiave, True
+
+
+def statistiche_scansioni() -> dict:
+    """Quante volte riaprono il menu, e ogni quanto."""
+    tutti = sorted(t for d in dispositivi.values() for t in d["ts"])
+    riaperture = sum(max(0, len(d["ts"]) - 1) for d in dispositivi.values())
+    intervalli = []
+    for d in dispositivi.values():
+        ts = sorted(d["ts"])
+        intervalli += [b - a for a, b in zip(ts, ts[1:])]
+    return {
+        "dispositivi": len(dispositivi),
+        "scansioni": len(tutti),
+        "riaperture": riaperture,
+        # La media la calcolo per telefono, non sul totale: due telefoni che
+        # inquadrano insieme non sono "una riapertura ogni zero secondi".
+        "ogni": int(sum(intervalli) / len(intervalli)) if intervalli else 0,
+    }
 apertura: list[float] = []         # quando si e' aperto il tavolo
 
 
@@ -371,15 +406,15 @@ async def menu(tavolo: str, request: Request):
             wifi_offerto[0] = True
         except Exception:
             pass
-    # Un telefono porta con se' il suo biscotto: cosi' so quanti apparecchi
-    # diversi hanno inquadrato il QR, invece di contare le riaperture di pagina.
-    suo = request.cookies.get("lm_disp") or uuid.uuid4().hex[:8]
-    nuovo = suo not in dispositivi
-    dispositivi.add(suo)
+    suo, nuovo = riconosci(request.cookies.get("lm_disp"),
+                           request.client.host if request.client else "?",
+                           request.headers.get("user-agent", "?"))
+    dispositivi[suo]["ts"].append(time.time())
+    st = statistiche_scansioni()
 
     await manda_a_tutti({"tipo": "scansione", "tavolo": tavolo, "primo": primo})
     await manda_a_tutti(registra_evento("scansione", tavolo=tavolo,
-                                        nuovo=nuovo, dispositivi=len(dispositivi)))
+                                        nuovo=nuovo, **st))
 
     r = HTMLResponse(PAGINA_MENU.replace("{{tavolo}}", tavolo))
     r.set_cookie("lm_disp", suo, max_age=60 * 60 * 12, samesite="lax")

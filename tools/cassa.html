@@ -94,10 +94,13 @@
     <div class="numeri">
       <div class="numero"><div class="v" id="nCoperti">—</div><div class="e">coperti</div></div>
       <div class="numero"><div class="v" id="nDisp">—</div><div class="e">telefoni</div></div>
+      <div class="numero"><div class="v" id="nRiap">—</div><div class="e">riaperture</div></div>
       <div class="numero"><div class="v" id="nOrdini">—</div><div class="e">ordini</div></div>
       <div class="numero"><div class="v" id="nTotale">—</div><div class="e">euro</div></div>
       <div class="numero"><div class="v" id="nDurata">—</div><div class="e">a tavola</div></div>
     </div>
+
+    <div class="sottotitolo" id="notaScansioni" style="margin-top:12px"></div>
 
     <button class="pulsante" id="libera">Il pasto è finito · libera il tavolo</button>
   </div>
@@ -118,6 +121,7 @@
 const SEGNI = {aperto:'●', coperti:'●', scansione:'◆', ordine:'■',
                stato:'▸', liberato:'○'};
 let apertoDa = null, ordini = 0, totale = 0, coperti = 0, telefoni = 0;
+let riaperture = 0, ogniSec = 0;
 const storia = document.getElementById('storia');
 let righe = [];
 
@@ -135,9 +139,14 @@ setInterval(()=>{ q('nDurata').textContent = durata(); }, 10000);
 function aggiorna(){
   q('nCoperti').textContent = coperti || '—';
   q('nDisp').textContent    = telefoni || '—';
+  q('nRiap').textContent    = riaperture || '—';
   q('nOrdini').textContent  = ordini || '—';
   q('nTotale').textContent  = totale ? euro(totale) : '—';
   q('nDurata').textContent  = durata();
+  q('notaScansioni').textContent = ogniSec
+    ? (ogniSec < 60 ? `riaprono il menu ogni ${ogniSec} secondi in media`
+                    : `riaprono il menu ogni ${Math.round(ogniSec/60)} minuti in media`)
+    : '';
   const vivo = !!apertoDa;
   q('pallino').classList.toggle('vivo', vivo);
   q('statoTavolo').textContent = vivo ? `Tavolo occupato` : 'Tavolo libero';
@@ -168,9 +177,13 @@ function evento(m){
     coperti = m.coperti;
     titolo = 'Coperti aggiornati'; dettaglio = `ora sono ${m.coperti}`;
   } else if(m.evento==='scansione'){
-    telefoni = m.dispositivi;
+    telefoni = m.dispositivi; riaperture = m.riaperture||0; ogniSec = m.ogni||0;
     titolo = m.nuovo ? 'Menu aperto da un nuovo telefono' : 'Menu riaperto';
-    dettaglio = `${m.dispositivi} ${m.dispositivi===1?'telefono':'telefoni'} al tavolo`;
+    const pezzi = [`${m.dispositivi} ${m.dispositivi===1?'telefono':'telefoni'}`];
+    if(m.scansioni>m.dispositivi) pezzi.push(`${m.scansioni} aperture in tutto`);
+    if(ogniSec) pezzi.push(ogniSec<60 ? `riaprono ogni ${ogniSec} secondi`
+                                      : `riaprono ogni ${Math.round(ogniSec/60)} minuti`);
+    dettaglio = pezzi.join(' · ');
   } else if(m.evento==='ordine'){
     ordini++; totale += (m.totale||0);
     titolo = 'Ordine inviato in cucina';
@@ -186,7 +199,8 @@ function evento(m){
     titolo = 'Tavolo liberato';
     dettaglio = d ? `servizio durato ${Math.round(d/60)} minuti` : '';
     apertoDa = null; apertoOra = null; coperti = 0; telefoni = 0;
-    ordini = 0; totale = 0; ordineVivo = null; disegnaOrdine();
+    ordini = 0; totale = 0; riaperture = 0; ogniSec = 0;
+    ordineVivo = null; disegnaOrdine();
     righe = [];                       // servizio chiuso, la cassa riparte pulita
     righe.push({...m, titolo, dettaglio});
     disegna(); aggiorna(); return;
