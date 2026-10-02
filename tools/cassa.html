@@ -122,6 +122,7 @@
 
     <div class="sottotitolo" id="notaScansioni" style="margin-top:12px"></div>
 
+    <button class="pulsante quieto" id="rimettiQr">Rimetti il QR del menu sul tavolo</button>
     <button class="pulsante" id="libera">Il pasto è finito · libera il tavolo</button>
   </div>
 
@@ -359,6 +360,13 @@ function collega(){
   };
 }
 collega();
+
+q('rimettiQr').onclick = async ()=>{
+  const b = q('rimettiQr'); b.disabled = true;
+  try{ await fetch('/api/menu',{method:'POST'}); }catch(e){}
+  // L'e-ink ci mette qualche secondo: tenerlo spento evita che lo ripremano.
+  setTimeout(()=>{ b.disabled = false; }, 5000);
+};
 
 q('libera').onclick = async ()=>{
   const b = q('libera'); b.disabled = true;

@@ -360,6 +360,12 @@ static void comando(const char *r) {
     strncpy(vinoNome, r + 2, sizeof(vinoNome) - 1);
   } else if (r[0] == 'C' && r[1] == ':') {
     strncpy(vinoMotivo, r + 2, sizeof(vinoMotivo) - 1);
+  } else if (r[0] == 'Q' && r[1] == 0) {
+    // "rimetti il QR": stessa cosa del tasto MENU, ma dalla cassa.
+    specialeDa = 0;
+    copertiChiesti = eSpeciale(copertiMostrati)
+                     ? copertiDopo
+                     : (copertiMostrati > 0 ? copertiMostrati : 1);
   } else if (r[0] == 'Y' && r[1] == 0) {
     copertiDopo = (copertiMostrati > 0) ? copertiMostrati : 1;
     copertiChiesti = MOSTRA_VINO;
@@ -442,7 +448,12 @@ void loop() {
         Serial.printf("[tasto] IO%d premuto\n", TASTI[i]);
         if (TASTI[i] == PIN_MENU) {
           specialeDa = 0;                               // annullo l'attesa
-          copertiChiesti = (copertiMostrati > 0) ? copertiMostrati : 1;
+          // Se sto mostrando una schermata speciale, copertiMostrati e' un
+          // valore in codice e non un numero di persone: devo tornare a quello
+          // che mi ero segnato, altrimenti il tavolo da tre diventa da uno.
+          copertiChiesti = eSpeciale(copertiMostrati)
+                           ? copertiDopo
+                           : (copertiMostrati > 0 ? copertiMostrati : 1);
           forzaRidisegno = true;
           Serial.println("[tasto] MENU: rimetto il QR del menu");
         }

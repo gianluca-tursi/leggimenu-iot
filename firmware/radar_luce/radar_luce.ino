@@ -431,6 +431,11 @@ static void eseguiComando(char c) {
                      " un secondo, il filo o il suo firmware non vanno");
       break;
 
+    case 'Q':                                  // rimetti il QR del menu
+      Serial1.println("Q");
+      Serial.println(">>> QR del menu rimesso sul pannello");
+      break;
+
     case 'Y':                                  // abbinamento del vino
       Serial1.println("Y");
       avviaStrisciata(3, accesiOra < 0 ? 0 : accesiOra);

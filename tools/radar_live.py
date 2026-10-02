@@ -736,6 +736,18 @@ async def ordine_stato(dati: dict):
     return {"ok": True}
 
 
+@app.post("/api/menu")
+async def rimetti_menu():
+    """Rimette il QR del menu sul pannello, da qualunque schermata."""
+    if not seriale_aperta:
+        return {"ok": False, "motivo": "nodo non collegato"}
+    try:
+        seriale_aperta[0].write(b"Q\n")
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "motivo": str(e)}
+
+
 @app.post("/api/pausa")
 async def pausa(dati: dict):
     """Quanti secondi ignorare il radar dopo "il pasto e' finito"."""
