@@ -71,6 +71,22 @@
   .azioni{display:flex;gap:9px;margin-top:18px;flex-wrap:wrap}
   .azioni .pulsante{width:auto;flex:1 1 auto;min-width:138px;margin-top:0}
   .piatti{margin-top:12px;padding-top:12px;border-top:1px solid var(--riga)}
+
+  .linea{display:flex;align-items:flex-start;margin:4px 0 2px;overflow-x:auto;
+    padding-bottom:4px}
+  .tappa{flex:0 0 auto;text-align:center;min-width:62px}
+  .bollo{width:13px;height:13px;border-radius:7px;margin:0 auto 7px;
+    background:var(--riga);border:2px solid var(--carta);
+    box-shadow:0 0 0 2px var(--riga)}
+  .tappa.fatta .bollo{background:var(--verde);box-shadow:0 0 0 2px var(--verde)}
+  .tappa.ora .bollo{background:var(--accento);box-shadow:0 0 0 4px rgba(10,132,255,.22)}
+  .tappa .nome{font-size:11.5px;font-weight:600;letter-spacing:-.01em}
+  .tappa.futura .nome{color:var(--tenue);font-weight:500}
+  .tappa .quando{font-size:11px;color:var(--tenue);font-variant-numeric:tabular-nums}
+  .ponte{flex:1 1 auto;min-width:18px;text-align:center;padding-top:5px}
+  .ponte .tratto{height:2px;background:var(--riga);margin-bottom:5px}
+  .ponte.fatto .tratto{background:var(--verde)}
+  .ponte .delta{font-size:10.5px;color:var(--tenue);font-variant-numeric:tabular-nums}
 </style>
 </head>
 <body>
@@ -83,6 +99,10 @@
     </div>
     <div class="sottotitolo" id="collegamento">collegamento…</div>
   </header>
+
+  <div class="carta">
+    <div class="linea" id="linea"></div>
+  </div>
 
   <div class="carta">
     <div class="stato">
@@ -119,7 +139,7 @@
 </div>
 <script>
 const SEGNI = {aperto:'●', coperti:'●', scansione:'◆', ordine:'■',
-               stato:'▸', liberato:'○'};
+               stato:'▸', vino:'◇', liberato:'○'};
 let apertoDa = null, ordini = 0, totale = 0, coperti = 0, telefoni = 0;
 let riaperture = 0, ogniSec = 0;
 const storia = document.getElementById('storia');
@@ -171,6 +191,7 @@ function evento(m){
   let titolo = '', dettaglio = '';
   if(m.evento==='aperto'){
     apertoDa = Date.now(); apertoOra = m.ora; coperti = m.coperti;
+    segna('aperto', m.ts);
     titolo = 'Tavolo aperto';
     dettaglio = `${m.coperti} ${m.coperti===1?'coperto rilevato':'coperti rilevati'}`;
   } else if(m.evento==='coperti'){
@@ -186,10 +207,15 @@ function evento(m){
     dettaglio = pezzi.join(' · ');
   } else if(m.evento==='ordine'){
     ordini++; totale += (m.totale||0);
+    segna('ordine', m.ts);
     titolo = 'Ordine inviato in cucina';
     dettaglio = m.righe.map(r=>`${r.qta}× ${r.nome}`).join(' · ')
               + (m.totale?` — ${euro(m.totale)} euro`:'');
+  } else if(m.evento==='vino'){
+    titolo = 'Abbinamento proposto';
+    dettaglio = `${m.nome} (${m.colore}) · ${m.quanto} — ${m.motivo}`;
   } else if(m.evento==='stato'){
+    if(['servito','conto','pagato'].includes(m.stato)) segna(m.stato, m.ts);
     const f = FLUSSO[m.stato];
     titolo = f ? f.nome.charAt(0).toUpperCase()+f.nome.slice(1) : m.stato;
     const mm = Math.round((m.atteso||0)/60);
@@ -202,6 +228,8 @@ function evento(m){
     ordini = 0; totale = 0; riaperture = 0; ogniSec = 0;
     ordineVivo = null; disegnaOrdine();
     righe = [];                       // servizio chiuso, la cassa riparte pulita
+    Object.keys(raggiunte).forEach(k => delete raggiunte[k]);
+    disegnaLinea();
     righe.push({...m, titolo, dettaglio});
     disegna(); aggiorna(); return;
   } else return;
@@ -219,9 +247,57 @@ const FLUSSO = {
   servito:      {nome:'servito',           nota:'servito da',
                  azioni:[['conto','Porta il conto']]},
   conto:        {nome:'conto richiesto',   nota:'conto chiesto da',
+                 azioni:[['pagato','Conto pagato']]},
+  pagato:       {nome:'pagato',            nota:'pagato da',
                  azioni:[]},
 };
 let ordineVivo = null;
+
+// Le tappe della vita di un tavolo. Quello che interessa in sala non e'
+// l'elenco di tutto quello che e' successo, ma a che punto siamo e da quanto.
+const TAPPE = [
+  {chiave:'aperto',  nome:'Aperto'},
+  {chiave:'ordine',  nome:'Ordine'},
+  {chiave:'servito', nome:'Servito'},
+  {chiave:'conto',   nome:'Conto'},
+  {chiave:'pagato',  nome:'Pagato'},
+];
+const raggiunte = {};              // chiave -> secondi
+
+function breve(sec){
+  if(sec < 60) return sec + 's';
+  const m = Math.round(sec/60);
+  return m < 60 ? m + "'" : Math.floor(m/60) + 'h' + String(m%60).padStart(2,'0');
+}
+function orario(sec){
+  return new Date(sec*1000).toLocaleTimeString('it-IT',
+    {hour:'2-digit', minute:'2-digit'});
+}
+
+function disegnaLinea(){
+  const fatte = TAPPE.filter(t => raggiunte[t.chiave] !== undefined);
+  const ultima = fatte.length ? fatte[fatte.length-1].chiave : null;
+  let html = '';
+  TAPPE.forEach((t, i) => {
+    const ts = raggiunte[t.chiave];
+    const classe = ts === undefined ? 'futura' : (t.chiave === ultima ? 'ora fatta' : 'fatta');
+    if(i){
+      const prima = raggiunte[TAPPE[i-1].chiave];
+      const delta = (ts !== undefined && prima !== undefined) ? breve(Math.round(ts - prima)) : '';
+      html += `<div class="ponte ${ts!==undefined?'fatto':''}">
+                 <div class="tratto"></div><div class="delta">${delta}</div></div>`;
+    }
+    html += `<div class="tappa ${classe}"><div class="bollo"></div>
+               <div class="nome">${t.nome}</div>
+               <div class="quando">${ts!==undefined?orario(ts):'—'}</div></div>`;
+  });
+  document.getElementById('linea').innerHTML = html;
+}
+disegnaLinea();
+
+function segna(chiave, ts){
+  if(raggiunte[chiave] === undefined){ raggiunte[chiave] = ts; disegnaLinea(); }
+}
 
 function minuti(da){ return Math.floor((Date.now()/1000 - da)/60); }
 

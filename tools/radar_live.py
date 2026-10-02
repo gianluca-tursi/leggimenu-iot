@@ -12,6 +12,7 @@ import atexit
 import os
 import pathlib
 import uuid
+import sys
 import asyncio
 import glob
 import json
@@ -71,14 +72,12 @@ h1{margin:0 0 2px;font-size:26px}.s{color:#8a807a;font-size:14px;margin-bottom:2
 <div class="b"><button id="invia" disabled>Invia l'ordine</button>
 <div class="m" id="msg"></div></div>
 <script>
-const PIATTI=[["Tagliere del casaro",14],["Cacio e pepe",13],
-              ["Coda alla vaccinara",18],["Carciofo alla giudia",7],
-              ["Maritozzo",6]];
+const PIATTI=__PIATTI__;
 const qta=PIATTI.map(()=>0);
 const lista=document.getElementById('lista');
 PIATTI.forEach((p,i)=>{
   const d=document.createElement('div'); d.className='p';
-  d.innerHTML=`<div class="n"><b>${p[0]}</b><span class="e">${p[1]} euro</span></div>
+  d.innerHTML=`<div class="n"><b>${p.nome}</b><span class="e">${p.prezzo} euro</span></div>
     <div class="q"><button data-i="${i}" data-d="-1">&minus;</button>
     <span id="q${i}">0</span><button data-i="${i}" data-d="1">+</button></div>`;
   lista.appendChild(d);
@@ -91,7 +90,8 @@ lista.onclick=e=>{
   document.getElementById('invia').disabled = qta.every(q=>q===0);
 };
 document.getElementById('invia').onclick=async()=>{
-  const righe=PIATTI.map((p,i)=>({nome:p[0],qta:qta[i],prezzo:p[1]})).filter(r=>r.qta>0);
+  const righe=PIATTI.map((p,i)=>({id:p.id,nome:p.nome,qta:qta[i],prezzo:p.prezzo}))
+                     .filter(r=>r.qta>0);
   const msg=document.getElementById('msg'), bot=document.getElementById('invia');
   bot.disabled=true; msg.textContent='invio...';
   try{
@@ -111,6 +111,53 @@ PORTA_HTTP: list[int] = []
 # shell che sta eseguendo il comando in cui compare la stringa - e un pkill
 # dello stesso tipo si porta via la shell stessa.
 FILE_PID = pathlib.Path("/tmp/leggimenu-dashboard.pid")
+
+# Il menu e le regole del vino stanno in backend/: li' ci sono le categorie e i
+# tag dei piatti, senza i quali l'abbinamento non ha su cosa ragionare.
+sys.path.insert(0, str(QUI.parent / "backend"))
+try:
+    from wine import MENU_BY_ID, suggerisci          # type: ignore
+    from models import RigaOrdine                    # type: ignore
+    VINI_CARTA = json.loads(
+        (QUI.parent / "backend" / "data" / "wines.json").read_text())["vini"]
+except Exception as _e:                              # pragma: no cover
+    MENU_BY_ID, suggerisci, RigaOrdine, VINI_CARTA = {}, None, None, []
+    print(f"[vino] motore non disponibile: {_e}")
+
+
+def piatti_ordinabili() -> list[dict]:
+    """Quello che il cliente vede sul telefono: le portate piu' qualche vino.
+
+    I vini servono anche a far funzionare il suggerimento: senza poterli
+    ordinare, "il vino non e' stato ordinato" sarebbe sempre vero."""
+    voci = [{"id": p["id"], "nome": p["nome"], "prezzo": p["prezzo"],
+             "categoria": p["categoria"]}
+            for p in MENU_BY_ID.values()]
+    for v in VINI_CARTA[:3]:
+        voci.append({"id": v["id"], "nome": f"{v['nome']} (calice)",
+                     "prezzo": v["calice"], "categoria": "bevanda"})
+    return voci
+
+
+def abbina_vino(righe: list[dict], coperti: int):
+    """Il vino da proporre, o None se non ha senso proporlo."""
+    if not suggerisci or not RigaOrdine:
+        return None
+    # Se il vino l'hanno gia' ordinato, proporlo e' maleducazione.
+    if any(MENU_BY_ID.get(r.get("id"), {}).get("categoria") == "bevanda"
+           or str(r.get("id", "")).startswith("vin-") for r in righe):
+        return None
+    ordine = []
+    for r in righe:
+        p = MENU_BY_ID.get(r.get("id"))
+        if not p:
+            continue
+        ordine.append(RigaOrdine(id=p["id"], piatto_id=p["id"], nome=p["nome"],
+                                 categoria=p["categoria"], prezzo=p["prezzo"],
+                                 quantita=int(r.get("qta", 1)), tag=p["tag"]))
+    if not ordine:
+        return None
+    return suggerisci(ordine, max(coperti, 1))
 # Il WiFi si offre una volta sola per sessione al tavolo: alla seconda
 # scansione il cliente lo ha gia' visto, e ripeterglielo gli toglierebbe il
 # QR del menu proprio mentre lo sta usando. Si riarma quando il tavolo si libera.
@@ -126,7 +173,7 @@ eventi: list[dict] = []
 #   inviato -> in preparazione -> servito -> conto
 # La cassa mostra da quanti minuti e' fermo nello stato in cui sta, perche' e'
 # l'unica cosa che fa agire qualcuno.
-STATI = ["inviato", "preparazione", "servito", "conto"]
+STATI = ["inviato", "preparazione", "servito", "conto", "pagato"]
 ordine_corrente: dict = {}
 # Chi ha inquadrato il QR, in questa sessione. Il biscotto da solo non basta:
 # la fotocamera di iOS apre il link in una finestra che spesso non lo conserva,
@@ -581,7 +628,8 @@ async def menu(tavolo: str, request: Request):
     await manda_a_tutti(registra_evento("scansione", tavolo=tavolo,
                                         nuovo=nuovo, **st))
 
-    r = HTMLResponse(PAGINA_MENU.replace("{{tavolo}}", tavolo))
+    r = HTMLResponse(PAGINA_MENU.replace("{{tavolo}}", tavolo)
+                                .replace("__PIATTI__", json.dumps(piatti_ordinabili())))
     r.set_cookie("lm_disp", suo, max_age=60 * 60 * 12, samesite="lax")
     return r
 
@@ -643,6 +691,31 @@ async def ordine(dati: dict):
             seriale_aperta[0].write(b"X\n")          # mostra la schermata
         except Exception as e:
             return {"ok": True, "pannello": f"non raggiunto: {e}"}
+
+    coperti = apertura[1] if len(apertura) > 1 else 2
+    vino = abbina_vino(righe, coperti)
+    if vino:
+        n = vino.quantita_consigliata
+        quanto = ("una bottiglia" if vino.formato_consigliato == "bottiglia"
+                  else f"{n} {'calice' if n == 1 else 'calici'}")
+        # "colore" e non "tipo": registra_evento ha gia' un parametro tipo e
+        # i due si scontrerebbero.
+        prop = {"nome": vino.nome, "colore": vino.tipo, "motivo": vino.motivo,
+                "calice": vino.calice, "bottiglia": vino.bottiglia,
+                "quanto": quanto}
+        ordine_corrente["vino"] = prop
+        await manda_a_tutti(registra_evento("vino", **prop))
+        if seriale_aperta:
+            try:
+                # Al tavolo arriva solo l'essenziale: nome e perche'. Il
+                # pannello ha 27 caratteri per riga, non ci sta un discorso.
+                seriale_aperta[0].write(f"B:{vino.nome}\n".encode()[:40])
+                time.sleep(0.05)
+                seriale_aperta[0].write(f"C:{vino.motivo}\n".encode()[:40])
+                time.sleep(0.05)
+                seriale_aperta[0].write(b"Y\n")
+            except Exception:
+                pass
     return {"ok": True}
 
 
@@ -659,6 +732,7 @@ async def ordine_stato(dati: dict):
     ordine_corrente["da"] = time.time()      # il cronometro riparte da qui
     await manda_a_tutti(registra_evento("stato", stato=nuovo, atteso=atteso))
     await manda_a_tutti({"tipo": "ordine_stato", **ordine_corrente})
+
     return {"ok": True}
 
 

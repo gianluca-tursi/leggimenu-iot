@@ -129,6 +129,7 @@ static const uint32_t MIN_FRA_DISEGNI_MS = 4000;
 // secondi, invece di avere un percorso tutto suo che scavalca i controlli.
 static const int MOSTRA_WIFI   = -7;
 static const int MOSTRA_ORDINE = -8;
+static const int MOSTRA_VINO   = -9;
 static const int NIENTE        = -1;   // nessuna richiesta in sospeso
 
 // L'ordine arrivato dal telefono. Otto righe bastano per un tavolo: se ne
@@ -148,13 +149,21 @@ static const bool TASTI_A_DESTRA = true;
 // Sono i due numeri da cambiare se durano troppo o troppo poco.
 static const uint32_t DURATA_WIFI_MS   = 30000;   // 30 s
 static const uint32_t DURATA_ORDINE_MS = 60000;   // 60 s
+static const uint32_t DURATA_VINO_MS   = 45000;   // 45 s
+
+char vinoNome[40]   = "";
+char vinoMotivo[40] = "";
 
 int      copertiDopo = 1;      // a cosa tornare quando la speciale finisce
 uint32_t specialeDa  = 0;      // da quando e' sullo schermo (0 = nessuna)
 
-static bool eSpeciale(int c) { return c == MOSTRA_WIFI || c == MOSTRA_ORDINE; }
+static bool eSpeciale(int c) {
+  return c == MOSTRA_WIFI || c == MOSTRA_ORDINE || c == MOSTRA_VINO;
+}
 static uint32_t durataSpeciale(int c) {
-  return (c == MOSTRA_ORDINE) ? DURATA_ORDINE_MS : DURATA_WIFI_MS;
+  if (c == MOSTRA_ORDINE) return DURATA_ORDINE_MS;
+  if (c == MOSTRA_VINO)   return DURATA_VINO_MS;
+  return DURATA_WIFI_MS;
 }
 
 bool     forzaRidisegno  = false;   // testo cambiato: ridisegna anche a parita' di coperti
@@ -261,6 +270,34 @@ static void schermoOrdine() {
   }
 }
 
+/* Spezza un testo in due righe senza tagliare le parole a meta'. */
+static void dueRighe(const char *testo, int larghezza, int y1, int y2,
+                     const GFXfont *font) {
+  int n = strlen(testo);
+  if (n <= larghezza) { centrata(testo, font, y1); return; }
+  int taglio = larghezza;
+  while (taglio > 0 && testo[taglio] != ' ') taglio--;
+  if (!taglio) taglio = larghezza;
+  char a[48], b[48];
+  snprintf(a, sizeof(a), "%.*s", taglio, testo);
+  snprintf(b, sizeof(b), "%s", testo + taglio + 1);
+  centrata(a, font, y1);
+  centrata(b, font, y2);
+}
+
+static void schermoVino() {
+  centrata("Con questi piatti", &FreeMono12pt7b, 60);
+  centrata("consigliamo",       &FreeMono12pt7b, 88);
+
+  // Il nome del vino e' la cosa che deve leggersi da lontano.
+  dueRighe(vinoNome, 13, 150, 192, &FreeMonoBold18pt7b);
+
+  epd.drawFastHLine(60, 232, epd.width() - 120, GxEPD_BLACK);
+  dueRighe(vinoMotivo, 25, 272, 298, &FreeMono12pt7b);
+
+  centrata("chiedilo al cameriere", &FreeMono9pt7b, 360);
+}
+
 static void disegna(int coperti) {
   epd.setRotation(1);                       // 400x300 -> 300x400, verticale
   epd.setTextColor(GxEPD_BLACK);
@@ -268,7 +305,8 @@ static void disegna(int coperti) {
   epd.firstPage();
   do {
     epd.fillScreen(GxEPD_WHITE);
-    if (coperti == MOSTRA_ORDINE)    schermoOrdine();
+    if (coperti == MOSTRA_VINO)      schermoVino();
+    else if (coperti == MOSTRA_ORDINE) schermoOrdine();
     else if (coperti == MOSTRA_WIFI) schermoWifi();
     else if (coperti > 0)       schermoBenvenuto();
     else                        schermoLibero();
@@ -318,6 +356,13 @@ static void comando(const char *r) {
     ricorda();
     Serial.println("[link] <- Q: (rete wifi aggiornata)");   // la chiave non si stampa
     return;
+  } else if (r[0] == 'B' && r[1] == ':') {
+    strncpy(vinoNome, r + 2, sizeof(vinoNome) - 1);
+  } else if (r[0] == 'C' && r[1] == ':') {
+    strncpy(vinoMotivo, r + 2, sizeof(vinoMotivo) - 1);
+  } else if (r[0] == 'Y' && r[1] == 0) {
+    copertiDopo = (copertiMostrati > 0) ? copertiMostrati : 1;
+    copertiChiesti = MOSTRA_VINO;
   } else if (r[0] == 'Z' && r[1] == 0) {
     nOrdine = 0;                                 // nuovo ordine in arrivo
   } else if (r[0] == 'V' && r[1] == ':') {
