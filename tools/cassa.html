@@ -155,10 +155,10 @@
     <div class="modale">
       <h3>Qualcuno si è seduto</h3>
       <p id="modaleNota">Il sensore ne ha rilevato uno. Quanti sono davvero?</p>
+      <p style="margin:-14px 0 16px;font-size:13px" id="modaleAiuto">Tocca il numero: il tavolo si apre.</p>
       <div class="scelte" id="scelte"></div>
       <div class="fondo">
-        <button class="pulsante quieto" id="annullaApertura">Non è nessuno</button>
-        <button class="pulsante" id="confermaApertura">Apri il tavolo</button>
+        <button class="pulsante quieto" id="annullaApertura">Non è nessuno, chiudi</button>
       </div>
     </div>
   </div>
@@ -389,29 +389,31 @@ function apriModale(rilevati){
     ? `Il sensore ne ha rilevat${rilevati===1?'o uno':'i '+rilevati}. Quanti sono davvero?`
     : 'Quante persone si sono sedute?';
   q('scelte').innerHTML = [1,2,3,4,5,6,7,8].map(n=>
-    `<button data-n="${n}" class="${n===scelto?'scelto':''}">${n}</button>`).join('');
+    `<button data-n="${n}">${n}</button>`).join('');
   q('velo').classList.add('aperto');
 }
 function chiudiModale(){ q('velo').classList.remove('aperto'); }
 
-q('scelte').onclick = e=>{
+// Un tocco e basta: in sala si ha una mano occupata, e un secondo pulsante di
+// conferma e' un passaggio in piu' per confermare un numero gia' scelto.
+q('scelte').onclick = async e=>{
   const b = e.target.closest('button[data-n]'); if(!b) return;
   scelto = +b.dataset.n;
-  [...q('scelte').children].forEach(x=>
-    x.classList.toggle('scelto', x === b));
+  [...q('scelte').children].forEach(x => x.classList.toggle('scelto', x === b));
+  await conferma(scelto);
 };
 
-q('confermaApertura').onclick = async ()=>{
+async function conferma(n){
   chiudiModale();
   try{
     const r = await fetch('/api/coperti',{method:'POST',
-      headers:{'Content-Type':'application/json'}, body:JSON.stringify({n:scelto})});
+      headers:{'Content-Type':'application/json'}, body:JSON.stringify({n})});
     const d = await r.json();
     // Se il nodo non ha ricevuto, la finestra deve tornare: altrimenti il
     // cameriere crede di aver confermato e il tavolo resta a uno.
-    if(!d.ok) apriModale(scelto);
-  }catch(e){ apriModale(scelto); }
-};
+    if(!d.ok) apriModale(n);
+  }catch(e){ apriModale(n); }
+}
 
 q('annullaApertura').onclick = async ()=>{
   chiudiModale();
