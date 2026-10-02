@@ -79,6 +79,31 @@ sull'App Store non c'è).
 tengono. Se invece vuoi ricompilare, servono Arduino IDE, il core ESP32 e tre
 librerie: GxEPD2, Adafruit GFX, Adafruit NeoPixel.
 
+## I due Mac
+
+Lo sviluppo si fa su una macchina sola; l'altra, quella che va in fiera, serve
+solo a far girare il progetto e non ha Arduino ne' strumenti di sviluppo.
+
+**Sul Mac di sviluppo**, dopo aver cambiato qualcosa:
+
+```bash
+git add -A && git commit -m "cosa ho cambiato" && git push
+```
+
+**Sul Mac della fiera**, per allinearsi:
+
+```bash
+./scripts/aggiorna.sh      # scarica, reinstalla se serve, riavvia il server
+./scripts/stato.sh         # dice cosa funziona e cosa manca
+```
+
+`stato.sh` e' pensato per quando non c'e' nessuno a cui chiedere: ogni riga
+dice se va o cosa fare.
+
+**Il firmware delle schede non si aggiorna cosi'.** Arduino sta solo sul Mac di
+sviluppo, quindi le schede vanno caricate **prima di partire**. Se durante la
+fiera serve una modifica al firmware, serve il Mac di sviluppo sul posto.
+
 ## Uso quotidiano
 
 ```bash
