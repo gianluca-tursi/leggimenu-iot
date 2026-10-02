@@ -285,6 +285,27 @@ async def chiudi_il_gestionale(request: Request, call_next):
     return await call_next(request)
 clienti: set[WebSocket] = set()
 seriale_aperta: list = []          # la Serial viva, per poter mandare comandi
+
+# --- il ponte -------------------------------------------------------------
+# Quando il server non sta sulla stessa macchina del nodo, il Mac a cui il
+# nodo e' attaccato apre un ponte: legge la seriale e la rigira qui, e porta
+# indietro i comandi. L'ESP32 cosi' non ha bisogno di WiFi suo - alla fiera e'
+# meglio avere una sola macchina collegata invece di due.
+ponte_vivo: bool = False
+SEGRETO = os.environ.get("LEGGIMENU_SEGRETO", "")
+
+
+class Ponte:
+    """Si comporta come la seriale, ma scrive dall'altra parte del mondo."""
+
+    def __init__(self, sock: WebSocket, loop):
+        self.sock, self.loop = sock, loop
+
+    def write(self, dati: bytes) -> None:
+        # Chiamato anche da codice sincrono: accodo e lascio fare al loop.
+        asyncio.run_coroutine_threadsafe(
+            self.sock.send_json({"comando": dati.decode("utf-8", "replace")}),
+            self.loop)
 ultimo = {"ts": 0.0, "bersagli": [], "n": 0}
 
 
@@ -303,17 +324,107 @@ async def diffondi(msg: dict) -> None:
             clienti.discard(ws)
 
 
+class Lettore:
+    """Trasforma le righe del nodo in messaggi per la dashboard.
+
+    Le righe arrivano da due strade diverse - il cavo USB qui, oppure un ponte
+    che le manda da un'altra macchina - ma vanno interpretate allo stesso modo.
+    Lo stato (il gruppo di bersagli in costruzione) vive qui dentro invece che
+    nel ciclo di lettura, cosi' le due strade non si calpestano.
+    """
+
+    def __init__(self, manda):
+        self.manda = manda            # dove depositare i messaggi pronti
+        self.parziale = ""
+        self.gruppo: list[dict] = []
+        self.attesi = 0
+        self.ultima_fase: dict = {}
+
+    def pezzo(self, dati: str) -> None:
+        """Un pezzo di testo appena arrivato, anche a meta' riga."""
+        self.parziale += dati
+        *linee, self.parziale = self.parziale.split("\n")
+        for riga in linee:
+            self.riga(riga)
+
+    def riga(self, riga: str) -> None:
+        m = RE_N.search(riga)
+        if m:
+            if self.attesi or self.gruppo:      # chiudo il gruppo precedente
+                self.manda({
+                    "tipo": "frame", "ts": time.time(),
+                    "bersagli": self.gruppo, "n": len(self.gruppo), **self.ultima_fase})
+            self.gruppo = []
+            self.attesi = int(m.group(1))
+            if self.attesi == 0:
+                self.manda({
+                    "tipo": "frame", "ts": time.time(), "bersagli": [], "n": 0,
+                    **self.ultima_fase})
+            return
+        fx = RE_FISSI.search(riga)
+        if fx:
+            self.manda(
+                {"tipo": "fissi", "n": int(fx.group(1)),
+                 "taratura": fx.group(2) == "si"})
+            if fx.group(3) is not None and int(fx.group(3)) > 0:
+                self.manda(
+                    {"tipo": "apertura", "coperti": int(fx.group(3))})
+            return
+        ap = RE_APERTO.search(riga)
+        if ap:
+            self.manda(
+                {"tipo": "apertura", "coperti": int(ap.group(1))})
+            return
+        pa = RE_PAUSA.search(riga)
+        if pa:
+            ultima_pausa[:] = [int(pa.group(1))]
+            self.manda(
+                                      {"tipo": "pausa", "secondi": int(pa.group(1))})
+            return
+        lc = RE_LUCE.search(riga)
+        if lc:
+            self.manda(
+                                      {"tipo": "luce", "led": int(lc.group(1))})
+            return
+        fs = RE_FASE.search(riga)
+        if fs:
+            self.ultima_fase = {"fase": fs.group(1), "candidati": int(fs.group(2)),
+                           "confermati": int(fs.group(3)), "manca": float(fs.group(4))}
+            return
+        dg = RE_D.search(riga)
+        if dg:
+            msg = {"tipo": "diagnosi", "byte": int(dg.group(1)),
+                   "frame": int(dg.group(2))}
+            rete = RE_RETE.search(riga)
+            if rete:
+                msg["ip"] = rete.group(1)
+                msg["rssi"] = int(rete.group(2))
+            rad = RE_RADAR.search(riga)
+            if rad:
+                msg["radar"] = (rad.group(1) == "ok")
+            self.manda(msg)
+            return
+        t = RE_T.search(riga)
+        if t:
+            x, y = int(t.group(2)), int(t.group(3))
+            self.gruppo.append({
+                "id": int(t.group(1)), "x": x, "y": y,
+                "dist": float(t.group(4)), "v": int(t.group(5)),
+                "ang": round(math.degrees(math.atan2(x, max(y, 1))), 1),
+            })
+
+
 def leggi_seriale(coda: asyncio.Queue, loop: asyncio.AbstractEventLoop) -> None:
     """Gira in un thread: la seriale e' bloccante, l'event loop no."""
     porta = None
     ser = None
-    parziale = ""
-    gruppo: list[dict] = []
-    attesi = 0
-    ultima_fase: dict = {}
+    lettore = Lettore(lambda m: loop.call_soon_threadsafe(coda.put_nowait, m))
 
     while True:
         if ser is None:
+            if ponte_vivo:
+                time.sleep(1.0)       # il nodo arriva dal ponte, non da qui
+                continue
             porta = trova_porta()
             if porta is None:
                 loop.call_soon_threadsafe(coda.put_nowait,
@@ -321,8 +432,7 @@ def leggi_seriale(coda: asyncio.Queue, loop: asyncio.AbstractEventLoop) -> None:
                 time.sleep(1.5)
                 continue
             try:
-                ser = serial.Serial(porta, 115200, timeout=0.3)
-                ser.setDTR(False); ser.setRTS(False)
+                ser = serial.Serial(porta, 115200, timeout=0.2)
                 seriale_aperta.clear(); seriale_aperta.append(ser)
                 loop.call_soon_threadsafe(coda.put_nowait,
                                           {"tipo": "stato", "collegato": True, "porta": porta})
@@ -336,77 +446,11 @@ def leggi_seriale(coda: asyncio.Queue, loop: asyncio.AbstractEventLoop) -> None:
             try: ser.close()
             except Exception: pass
             ser = None
+            seriale_aperta.clear()
             continue
         if not dati:
             continue
-
-        parziale += dati
-        *linee, parziale = parziale.split("\n")
-        for riga in linee:
-            m = RE_N.search(riga)
-            if m:
-                if attesi or gruppo:      # chiudo il gruppo precedente
-                    loop.call_soon_threadsafe(coda.put_nowait, {
-                        "tipo": "frame", "ts": time.time(),
-                        "bersagli": gruppo, "n": len(gruppo), **ultima_fase})
-                gruppo = []
-                attesi = int(m.group(1))
-                if attesi == 0:
-                    loop.call_soon_threadsafe(coda.put_nowait, {
-                        "tipo": "frame", "ts": time.time(), "bersagli": [], "n": 0,
-                        **ultima_fase})
-                continue
-            fx = RE_FISSI.search(riga)
-            if fx:
-                loop.call_soon_threadsafe(coda.put_nowait,
-                    {"tipo": "fissi", "n": int(fx.group(1)),
-                     "taratura": fx.group(2) == "si"})
-                if fx.group(3) is not None and int(fx.group(3)) > 0:
-                    loop.call_soon_threadsafe(coda.put_nowait,
-                        {"tipo": "apertura", "coperti": int(fx.group(3))})
-                continue
-            ap = RE_APERTO.search(riga)
-            if ap:
-                loop.call_soon_threadsafe(coda.put_nowait,
-                    {"tipo": "apertura", "coperti": int(ap.group(1))})
-                continue
-            pa = RE_PAUSA.search(riga)
-            if pa:
-                ultima_pausa[:] = [int(pa.group(1))]
-                loop.call_soon_threadsafe(coda.put_nowait,
-                                          {"tipo": "pausa", "secondi": int(pa.group(1))})
-                continue
-            lc = RE_LUCE.search(riga)
-            if lc:
-                loop.call_soon_threadsafe(coda.put_nowait,
-                                          {"tipo": "luce", "led": int(lc.group(1))})
-                continue
-            fs = RE_FASE.search(riga)
-            if fs:
-                ultima_fase = {"fase": fs.group(1), "candidati": int(fs.group(2)),
-                               "confermati": int(fs.group(3)), "manca": float(fs.group(4))}
-                continue
-            dg = RE_D.search(riga)
-            if dg:
-                msg = {"tipo": "diagnosi", "byte": int(dg.group(1)),
-                       "frame": int(dg.group(2))}
-                rete = RE_RETE.search(riga)
-                if rete:
-                    msg["ip"] = rete.group(1)
-                    msg["rssi"] = int(rete.group(2))
-                rad = RE_RADAR.search(riga)
-                if rad:
-                    msg["radar"] = (rad.group(1) == "ok")
-                loop.call_soon_threadsafe(coda.put_nowait, msg)
-                continue
-            t = RE_T.search(riga)
-            if t:
-                x, y = int(t.group(2)), int(t.group(3))
-                gruppo.append({
-                    "id": int(t.group(1)), "x": x, "y": y,
-                    "dist": float(t.group(4)), "v": int(t.group(5)),
-                    "ang": round(math.degrees(math.atan2(x, max(y, 1))), 1),
-                })
+        lettore.pezzo(dati)
 
 
 @app.post("/api/reset")
@@ -623,6 +667,57 @@ async def pagina() -> FileResponse:
 async def cassa() -> FileResponse:
     """La vista per il ristoratore: cosa e' successo al tavolo, non il radar."""
     return FileResponse(QUI / "cassa.html")
+
+
+@app.websocket("/ws/nodo")
+async def ws_nodo(sock: WebSocket) -> None:
+    """Il Mac col nodo attaccato si collega qui e fa da tramite."""
+    global ponte_vivo
+    await sock.accept()
+    if SEGRETO:
+        # Senza, chiunque conosca l'indirizzo potrebbe fingersi il tavolo e
+        # riempire la cassa di ordini inventati.
+        try:
+            benvenuto = await asyncio.wait_for(sock.receive_json(), timeout=5)
+        except Exception:
+            await sock.close(code=4001); return
+        if benvenuto.get("segreto") != SEGRETO:
+            await sock.close(code=4003); return
+
+    loop = asyncio.get_running_loop()
+    seriale_aperta.clear(); seriale_aperta.append(Ponte(sock, loop))
+    ponte_vivo = True
+    await diffondi({"tipo": "stato", "collegato": True, "porta": "ponte"})
+    lettore = Lettore(lambda m: asyncio.create_task(diffondi_o_accoda(m)))
+    try:
+        while True:
+            msg = await sock.receive_json()
+            if "righe" in msg:
+                lettore.pezzo(msg["righe"])
+    except Exception:
+        pass
+    finally:
+        ponte_vivo = False
+        seriale_aperta.clear()
+        await diffondi({"tipo": "stato", "collegato": False})
+
+
+async def diffondi_o_accoda(msg: dict) -> None:
+    """Stessa strada dei messaggi che arrivano dalla seriale locale."""
+    if msg.get("tipo") == "frame":
+        ultimo.update(msg)
+    elif msg.get("tipo") == "apertura":
+        n = msg.get("coperti", 0)
+        primo = not apertura
+        if primo:
+            apertura[:] = [time.time(), n]
+        elif n == apertura[1]:
+            return
+        else:
+            apertura[1] = n
+        await diffondi(registra_evento("aperto" if primo else "coperti", coperti=n))
+        return
+    await diffondi(msg)
 
 
 @app.websocket("/ws")

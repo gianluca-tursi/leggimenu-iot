@@ -16,3 +16,6 @@ build/
 
 # cloudflared: si riscarica da solo con scripts/tunnel.sh
 bin/
+
+# configurazione locale della macchina, con segreti
+.env.locale
