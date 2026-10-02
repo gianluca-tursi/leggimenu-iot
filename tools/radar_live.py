@@ -389,8 +389,21 @@ def _ip_locale() -> str:
 
 @app.get("/api/rete")
 async def rete():
-    """Dove puntare il QR del menu, gia' pronto da incollare."""
-    return {"ip": _ip_locale(), "porta": PORTA_HTTP[0] if PORTA_HTTP else 8080}
+    """Dove puntare il QR del menu, gia' pronto da incollare.
+
+    Oltre all'indirizzo numerico do anche il nome di rete del Mac: quello non
+    cambia quando il router riassegna gli indirizzi, e un QR stampato o gia'
+    disegnato sul pannello continua a funzionare. Lo capiscono tutti gli iPhone
+    e gli Android recenti, ma non quelli vecchi: percio' il numerico resta la
+    scelta sicura e il nome e' l'alternativa comoda."""
+    import subprocess
+    try:
+        nome = subprocess.run(["scutil", "--get", "LocalHostName"],
+                              capture_output=True, text=True, timeout=2).stdout.strip()
+    except Exception:
+        nome = ""
+    return {"ip": _ip_locale(), "porta": PORTA_HTTP[0] if PORTA_HTTP else 8080,
+            "nome": f"{nome}.local" if nome else ""}
 
 
 @app.get("/m/{tavolo}")

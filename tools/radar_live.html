@@ -173,6 +173,13 @@ document.getElementById('reset2').onclick=()=>{ azzeraNodo(); document.getElemen
 // si sbaglia, e un QR che punta a 127.0.0.1 dal telefono non apre niente.
 fetch('/api/rete').then(r=>r.json()).then(d=>{
   if(!fUrl.value) fUrl.value = `http://${d.ip}:${d.porta}/m/7`;
+  const e=document.getElementById('esitoQr');
+  if(d.nome) e.innerHTML =
+    `oppure <a href="#" id="usaNome" style="color:#5b8def">http://${d.nome}:${d.porta}/m/7</a>` +
+    ` &mdash; non cambia se il router riassegna gli indirizzi`;
+  const a=document.getElementById('usaNome');
+  if(a) a.onclick=ev=>{ ev.preventDefault();
+    fUrl.value=`http://${d.nome}:${d.porta}/m/7`; e.textContent='premi Aggiorna i QR'; };
 }).catch(()=>{});
 
 document.getElementById('salvaQr').onclick=async()=>{
