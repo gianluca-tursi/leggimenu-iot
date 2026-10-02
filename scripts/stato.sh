@@ -63,6 +63,16 @@ else
   no "server fermo"; info "./scripts/dashboard.sh avvia"
 fi
 
+echo
+echo "Tunnel pubblico"
+if pgrep -f "cloudflared tunnel" >/dev/null 2>&1; then
+  ok "attivo"
+  info "l'indirizzo e' nella finestra dove gira - cambia a ogni avvio,"
+  info "quindi dopo un riavvio va rimesso nel QR con 'Aggiorna i QR'"
+else
+  info "non attivo (serve solo se i clienti sono su rete mobile: ./scripts/tunnel.sh)"
+fi
+
 IP=$(ifconfig 2>/dev/null | awk '/inet /{if($2!="127.0.0.1"){print $2; exit}}')
 echo
 echo "Rete"
