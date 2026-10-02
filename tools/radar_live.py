@@ -11,6 +11,7 @@ from __future__ import annotations
 import atexit
 import os
 import pathlib
+import uuid
 import asyncio
 import glob
 import json
@@ -22,7 +23,7 @@ from pathlib import Path
 
 import serial
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse
 
 QUI = Path(__file__).parent
@@ -41,6 +42,7 @@ RE_LUCE = re.compile(r">>> luce:\s*(\d+)")
 # La pausa dopo la liberazione, in secondi. La ricordo perche' una dashboard
 # aperta dopo l'avvio del nodo non vedrebbe mai il valore corrente.
 RE_PAUSA = re.compile(r"\[pausa\]\s*(\d+)")
+RE_APERTO = re.compile(r">>> tavolo aperto:\s*(\d+)")
 
 PAGINA_MENU = """<!doctype html><html lang="it"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -112,8 +114,32 @@ FILE_PID = pathlib.Path("/tmp/leggimenu-dashboard.pid")
 # scansione il cliente lo ha gia' visto, e ripeterglielo gli toglierebbe il
 # QR del menu proprio mentre lo sta usando. Si riarma quando il tavolo si libera.
 wifi_offerto: list[bool] = [False]
+
+# --- la vita del tavolo ---------------------------------------------------
+# Il gestionale cassa non guarda il radar: guarda cosa e' successo e quando.
+# Tengo gli eventi qui cosi' una pagina aperta a meta' servizio vede comunque
+# tutto quello che e' gia' accaduto, invece di partire vuota.
+eventi: list[dict] = []
+dispositivi: set[str] = set()      # chi ha inquadrato il QR, in questa sessione
+apertura: list[float] = []         # quando si e' aperto il tavolo
+
+
+def registra_evento(tipo: str, **dati) -> dict:
+    ev = {"tipo": "evento", "evento": tipo, "ts": time.time(),
+          "ora": time.strftime("%H:%M"), **dati}
+    eventi.append(ev)
+    del eventi[:-60]                # ne bastano gli ultimi
+    return ev
+
+
+async def manda_a_tutti(msg: dict) -> None:
+    for c in list(clienti):
+        try:
+            await c.send_json(msg)
+        except Exception:
+            pass
 # Quanti bersagli fissi il firmware sta scartando come arredamento.
-RE_FISSI = re.compile(r"\[fissi\]\s*ignorati=(\d+)\s+taratura=(\w+)")
+RE_FISSI = re.compile(r"\[fissi\]\s*ignorati=(\d+)\s+taratura=(\w+)(?:\s+tavolo=(\d+))?")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -126,6 +152,20 @@ async def lifespan(app: FastAPI):
             msg = await coda.get()
             if msg.get("tipo") == "frame":
                 ultimo.update(msg)
+            elif msg.get("tipo") == "apertura":
+                # Il tavolo si apre una volta per servizio: i successivi
+                # annunci sono il conteggio che sale, non un tavolo nuovo.
+                n = msg.get("coperti", 0)
+                primo = not apertura
+                if primo:
+                    apertura[:] = [time.time(), n]
+                elif n == apertura[1]:
+                    continue                      # niente di nuovo, taccio
+                else:
+                    apertura[1] = n
+                await diffondi(registra_evento(
+                    "aperto" if primo else "coperti", coperti=n))
+                continue
             await diffondi(msg)
 
     task = asyncio.create_task(pompa())
@@ -212,6 +252,14 @@ def leggi_seriale(coda: asyncio.Queue, loop: asyncio.AbstractEventLoop) -> None:
                 loop.call_soon_threadsafe(coda.put_nowait,
                     {"tipo": "fissi", "n": int(fx.group(1)),
                      "taratura": fx.group(2) == "si"})
+                if fx.group(3) is not None and int(fx.group(3)) > 0:
+                    loop.call_soon_threadsafe(coda.put_nowait,
+                        {"tipo": "apertura", "coperti": int(fx.group(3))})
+                continue
+            ap = RE_APERTO.search(riga)
+            if ap:
+                loop.call_soon_threadsafe(coda.put_nowait,
+                    {"tipo": "apertura", "coperti": int(ap.group(1))})
                 continue
             pa = RE_PAUSA.search(riga)
             if pa:
@@ -272,6 +320,11 @@ async def libera():
     try:
         seriale_aperta[0].write(b"F\n")
         wifi_offerto[0] = False        # tavolo nuovo, suggerimento di nuovo utile
+        durata = int(time.time() - apertura[0]) if apertura else 0
+        await manda_a_tutti(registra_evento("liberato", durata=durata))
+        eventi.clear()                 # servizio chiuso: la cassa riparte pulita
+        dispositivi.clear()
+        apertura.clear()
         return {"ok": True}
     except Exception as e:
         return {"ok": False, "motivo": str(e)}
@@ -298,7 +351,7 @@ async def rete():
 
 
 @app.get("/m/{tavolo}")
-async def menu(tavolo: str):
+async def menu(tavolo: str, request: Request):
     """La pagina che si apre inquadrando il QR sul pannello.
 
     E' anche il rilevatore: se qualcuno la chiede, qualcuno ha scansionato.
@@ -310,12 +363,19 @@ async def menu(tavolo: str):
             wifi_offerto[0] = True
         except Exception:
             pass
-    for c in list(clienti):
-        try:
-            await c.send_json({"tipo": "scansione", "tavolo": tavolo, "primo": primo})
-        except Exception:
-            pass
-    return HTMLResponse(PAGINA_MENU.replace("{{tavolo}}", tavolo))
+    # Un telefono porta con se' il suo biscotto: cosi' so quanti apparecchi
+    # diversi hanno inquadrato il QR, invece di contare le riaperture di pagina.
+    suo = request.cookies.get("lm_disp") or uuid.uuid4().hex[:8]
+    nuovo = suo not in dispositivi
+    dispositivi.add(suo)
+
+    await manda_a_tutti({"tipo": "scansione", "tavolo": tavolo, "primo": primo})
+    await manda_a_tutti(registra_evento("scansione", tavolo=tavolo,
+                                        nuovo=nuovo, dispositivi=len(dispositivi)))
+
+    r = HTMLResponse(PAGINA_MENU.replace("{{tavolo}}", tavolo))
+    r.set_cookie("lm_disp", suo, max_age=60 * 60 * 12, samesite="lax")
+    return r
 
 
 @app.post("/api/qr")
@@ -351,12 +411,11 @@ async def ordine(dati: dict):
     if not righe:
         return {"ok": False, "motivo": "ordine vuoto"}
 
-    for c in list(clienti):
-        try:
-            await c.send_json({"tipo": "ordine", "tavolo": tavolo, "righe": righe,
-                               "quando": time.strftime("%H:%M:%S")})
-        except Exception:
-            pass
+    totale = sum(int(r.get("qta", 0)) * float(r.get("prezzo", 0)) for r in righe)
+    await manda_a_tutti({"tipo": "ordine", "tavolo": tavolo, "righe": righe,
+                         "quando": time.strftime("%H:%M:%S")})
+    await manda_a_tutti(registra_evento("ordine", tavolo=tavolo, righe=righe,
+                                        totale=totale))
 
     if seriale_aperta:
         try:
@@ -417,12 +476,20 @@ async def pagina() -> FileResponse:
     return FileResponse(QUI / "radar_live.html")
 
 
+@app.get("/cassa")
+async def cassa() -> FileResponse:
+    """La vista per il ristoratore: cosa e' successo al tavolo, non il radar."""
+    return FileResponse(QUI / "cassa.html")
+
+
 @app.websocket("/ws")
 async def ws(sock: WebSocket) -> None:
     await sock.accept()
     clienti.add(sock)
     if ultima_pausa:                     # stato iniziale per chi arriva dopo
         await sock.send_json({"tipo": "pausa", "secondi": ultima_pausa[0]})
+    for ev in eventi:                    # ...e tutto quello che e' gia' successo
+        await sock.send_json(ev)
     try:
         while True:
             await sock.receive_text()

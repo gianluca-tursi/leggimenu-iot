@@ -101,6 +101,24 @@ Prima di scegliere manca una misura: **due persone davanti al sensore a
 distanze chiaramente diverse** (30 cm e 80 cm). Se lì ne vede due, il limite è
 solo geometrico e la strada 1 basta.
 
+## Dove va a finire (deciso con Gianluca)
+
+Il gestionale cassa (`/cassa`) e' il primo pezzo di una cosa piu' grande. Nella
+testa sua, alla fine il tavolo dovra' anche:
+
+- **promuovere eventi futuri** nelle giornate scarse, sul pannello a tavolo
+  libero o a fine pasto
+- **misurare i tempi di gestione del tavolo** - quanto si aspetta prima di
+  ordinare, quanto dura il servizio. La durata gia' si registra alla
+  liberazione, manca lo storico fra un servizio e l'altro
+- **QR della recensione Google** a fine tavolo
+- **QR per pagare il conto** a fine pasto
+- **quanti telefoni** hanno inquadrato il QR a quel tavolo - gia' fatto, si
+  contano i dispositivi distinti con un cookie
+- **abbinamento del vino dopo il primo ordine**, ma solo se il vino non c'e'
+  gia' nell'ordine e solo se ha senso proporlo. `backend/wine.py` fa gia' i
+  conti, manca il collegamento e la regola del "ha senso"
+
 ## Cosa manca
 
 - **Abbinamento del vino**: `backend/wine.py` è scritto e collaudato ma non è

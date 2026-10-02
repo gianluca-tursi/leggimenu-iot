@@ -574,8 +574,12 @@ void loop() {
   if (millis() - ultimaDiag > 2000) {
     ultimaDiag = millis();
     bool inTaratura = (millis() - inizioTaratura) < TARATURA_MS;
-    Serial.printf("[fissi] ignorati=%d taratura=%s\n",
-                  quantiFissi(), inTaratura ? "si" : "no");
+    // Lo stato del tavolo va ripetuto anche qui, non solo quando cambia: la
+    // cassa aperta a meta' servizio altrimenti mostrerebbe un tavolo libero
+    // mentre la gente sta mangiando.
+    Serial.printf("[fissi] ignorati=%d taratura=%s tavolo=%d\n",
+                  quantiFissi(), inTaratura ? "si" : "no",
+                  tavoloAperto ? copertiTavolo : 0);
     Serial.printf("[diagnosi] radar=%s byte ricevuti: %lu | frame validi: %lu\n",
                   vivo ? "ok" : "MUTO",
                   (unsigned long)byteTot, (unsigned long)frameTot);

@@ -144,9 +144,18 @@ static const bool TASTI_A_DESTRA = true;
 // La schermata del WiFi e' un suggerimento, non una destinazione: passati questi
 // secondi il tavolo torna al suo QR del menu da solo, senza che nessuno debba
 // dirglielo. Se restasse li', il QR del menu sparirebbe per il resto della cena.
-static const uint32_t DURATA_WIFI_MS = 30000;
-int      copertiPrimaDelWifi = 1;
-uint32_t wifiDa = 0;
+// QUANTO RESTANO LE SCHERMATE SPECIALI prima di tornare al QR del menu.
+// Sono i due numeri da cambiare se durano troppo o troppo poco.
+static const uint32_t DURATA_WIFI_MS   = 30000;   // 30 s
+static const uint32_t DURATA_ORDINE_MS = 60000;   // 60 s
+
+int      copertiDopo = 1;      // a cosa tornare quando la speciale finisce
+uint32_t specialeDa  = 0;      // da quando e' sullo schermo (0 = nessuna)
+
+static bool eSpeciale(int c) { return c == MOSTRA_WIFI || c == MOSTRA_ORDINE; }
+static uint32_t durataSpeciale(int c) {
+  return (c == MOSTRA_ORDINE) ? DURATA_ORDINE_MS : DURATA_WIFI_MS;
+}
 
 bool     forzaRidisegno  = false;   // testo cambiato: ridisegna anche a parita' di coperti
 int      copertiMostrati = -1;      // -1 = niente disegnato ancora
@@ -267,7 +276,7 @@ static void disegna(int coperti) {
   epd.hibernate();
 
   copertiMostrati = coperti;
-  wifiDa = (coperti == MOSTRA_WIFI) ? millis() : 0;
+  specialeDa = eSpeciale(coperti) ? millis() : 0;
   forzaRidisegno = false;
   ultimoDisegno = millis();
   Serial.printf("[pannello] disegnato: %d coperti\n", coperti);
@@ -283,7 +292,14 @@ static void comando(const char *r) {
     if (*c < 32 || *c > 126) return;
 
   if (r[0] == 'T' && r[1] == ':') {
-    copertiChiesti = atoi(r + 2);
+    int n = atoi(r + 2);
+    // Il nodo ripete lo stato ogni 15 secondi per riallineare il pannello dopo
+    // un riavvio. Ma se e' in corso una schermata speciale, quella ripetizione
+    // la spazzerebbe via a meta': il WiFi durava 15 secondi invece di 30 e
+    // l'ordine spariva da solo. Qui me lo segno e basta; ci torno a tempo
+    // scaduto. La 'L' invece passa sempre: il tavolo liberato e' un fatto.
+    if (eSpeciale(copertiMostrati)) copertiDopo = (n > 0) ? n : 1;
+    else                            copertiChiesti = n;
   } else if (r[0] == 'L' && r[1] == 0) {
     copertiChiesti = 0;
   } else if (r[0] == '?') {
@@ -311,10 +327,10 @@ static void comando(const char *r) {
       nOrdine++;
     }
   } else if (r[0] == 'X' && r[1] == 0) {
-    copertiPrimaDelWifi = (copertiMostrati > 0) ? copertiMostrati : 1;
+    copertiDopo = (copertiMostrati > 0) ? copertiMostrati : 1;
     copertiChiesti = MOSTRA_ORDINE;
   } else if (r[0] == 'W' && r[1] == 0) {
-    copertiPrimaDelWifi = (copertiMostrati > 0) ? copertiMostrati : 1;
+    copertiDopo = (copertiMostrati > 0) ? copertiMostrati : 1;
     copertiChiesti = MOSTRA_WIFI;
   } else if (r[0] == 'G' && r[1] == ':') {
     strncpy(OSPITE, r + 2, sizeof(OSPITE) - 1);
@@ -380,7 +396,7 @@ void loop() {
         ultimoTasto = millis();
         Serial.printf("[tasto] IO%d premuto\n", TASTI[i]);
         if (TASTI[i] == PIN_MENU) {
-          wifiDa = 0;                                   // annullo l'attesa WiFi
+          specialeDa = 0;                               // annullo l'attesa
           copertiChiesti = (copertiMostrati > 0) ? copertiMostrati : 1;
           forzaRidisegno = true;
           Serial.println("[tasto] MENU: rimetto il QR del menu");
@@ -391,10 +407,10 @@ void loop() {
   }
 
   // Ridisegno solo se e' cambiato davvero e non troppo di frequente.
-  if (wifiDa && millis() - wifiDa > DURATA_WIFI_MS) {
-    copertiChiesti = copertiPrimaDelWifi;      // il suggerimento e' scaduto
-    wifiDa = 0;
-    Serial.println("[pannello] fine schermata WiFi, torno al menu");
+  if (specialeDa && millis() - specialeDa > durataSpeciale(copertiMostrati)) {
+    copertiChiesti = copertiDopo;              // il tempo e' scaduto
+    specialeDa = 0;
+    Serial.println("[pannello] schermata speciale finita, torno al menu");
   }
 
   // ATTENZIONE al confronto: "mostra il WiFi" e "nessuna richiesta" sono due

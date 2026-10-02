@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>leggimenu · cassa</title>
+<style>
+  :root{
+    --sfondo:#f5f5f7; --carta:#ffffff; --testo:#1d1d1f; --tenue:#86868b;
+    --riga:#e8e8ed; --accento:#0071e3; --verde:#1d8a4e; --ambra:#b25000;
+    --ombra:0 1px 2px rgba(0,0,0,.04), 0 6px 20px rgba(0,0,0,.05);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --sfondo:#000; --carta:#1c1c1e; --testo:#f5f5f7; --tenue:#8e8e93;
+           --riga:#2c2c2e; --accento:#0a84ff; --verde:#30d158; --ambra:#ff9f0a;
+           --ombra:none; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--sfondo);color:var(--testo);
+    font:15px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .pagina{max-width:860px;margin:0 auto;padding:32px 16px 80px}
+  header{display:flex;align-items:baseline;justify-content:space-between;
+    gap:16px;margin-bottom:26px;flex-wrap:wrap}
+  h1{font-size:27px;letter-spacing:-.022em;font-weight:600;margin:0}
+  .sottotitolo{color:var(--tenue);font-size:14px}
+  .carta{background:var(--carta);border-radius:18px;padding:22px;
+    box-shadow:var(--ombra);margin-bottom:16px}
+  .stato{display:flex;align-items:center;gap:14px;margin-bottom:4px}
+  .pallino{width:10px;height:10px;border-radius:5px;background:var(--tenue);
+    flex:0 0 auto}
+  .pallino.vivo{background:var(--verde);box-shadow:0 0 0 4px rgba(48,209,88,.18)}
+  .titolone{font-size:24px;font-weight:600;letter-spacing:-.02em}
+  .numeri{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));
+    gap:1px;background:var(--riga);border-radius:14px;overflow:hidden;margin-top:18px}
+  .numero{background:var(--carta);padding:15px 16px}
+  .numero .v{font-size:25px;font-weight:600;letter-spacing:-.02em;
+    font-variant-numeric:tabular-nums}
+  .numero .e{color:var(--tenue);font-size:12px;margin-top:2px}
+  h2{font-size:13px;font-weight:600;color:var(--tenue);text-transform:uppercase;
+    letter-spacing:.06em;margin:28px 4px 10px}
+  .evento{display:flex;gap:14px;padding:13px 0;border-top:1px solid var(--riga)}
+  .evento:first-child{border-top:0}
+  .ora{color:var(--tenue);font-size:13px;font-variant-numeric:tabular-nums;
+    flex:0 0 46px;padding-top:1px}
+  .corpo{flex:1;min-width:0}
+  .corpo b{font-weight:600}
+  .dettaglio{color:var(--tenue);font-size:13px;margin-top:2px}
+  .segno{flex:0 0 26px;text-align:center;font-size:15px;padding-top:1px}
+  .vuoto{color:var(--tenue);padding:6px 0}
+  .pulsante{appearance:none;border:0;border-radius:11px;padding:13px 20px;
+    background:var(--accento);color:#fff;font-size:15px;font-weight:500;
+    font-family:inherit;cursor:pointer;width:100%;margin-top:18px}
+  .pulsante.quieto{background:transparent;color:var(--accento);
+    box-shadow:inset 0 0 0 1px var(--riga)}
+  .pulsante:active{opacity:.75}
+  .riga-piatto{display:flex;justify-content:space-between;gap:12px;
+    padding:3px 0;font-size:14px}
+  .riga-piatto span{color:var(--tenue);font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+<div class="pagina">
+
+  <header>
+    <div>
+      <h1>leggimenu</h1>
+      <div class="sottotitolo">gestionale cassa</div>
+    </div>
+    <div class="sottotitolo" id="collegamento">collegamento…</div>
+  </header>
+
+  <div class="carta">
+    <div class="stato">
+      <div class="pallino" id="pallino"></div>
+      <div class="titolone" id="statoTavolo">Tavolo libero</div>
+    </div>
+    <div class="sottotitolo" id="statoNota">in attesa che qualcuno si sieda</div>
+
+    <div class="numeri">
+      <div class="numero"><div class="v" id="nCoperti">—</div><div class="e">coperti</div></div>
+      <div class="numero"><div class="v" id="nDisp">—</div><div class="e">telefoni</div></div>
+      <div class="numero"><div class="v" id="nOrdini">—</div><div class="e">ordini</div></div>
+      <div class="numero"><div class="v" id="nTotale">—</div><div class="e">euro</div></div>
+      <div class="numero"><div class="v" id="nDurata">—</div><div class="e">a tavola</div></div>
+    </div>
+
+    <button class="pulsante" id="libera">Il pasto è finito · libera il tavolo</button>
+  </div>
+
+  <h2>Cos'è successo</h2>
+  <div class="carta" id="storia"><div class="vuoto">ancora niente</div></div>
+
+</div>
+<script>
+const SEGNI = {aperto:'●', coperti:'●', scansione:'◆', ordine:'■', liberato:'○'};
+let apertoDa = null, ordini = 0, totale = 0, coperti = 0, telefoni = 0;
+const storia = document.getElementById('storia');
+let righe = [];
+
+const q = id => document.getElementById(id);
+const euro = n => (Math.round(n*100)/100).toLocaleString('it-IT');
+
+function durata(){
+  if(!apertoDa) return '—';
+  const s = Math.floor((Date.now()-apertoDa)/1000);
+  const m = Math.floor(s/60);
+  return m < 60 ? m+"'" : Math.floor(m/60)+'h'+String(m%60).padStart(2,'0');
+}
+setInterval(()=>{ q('nDurata').textContent = durata(); }, 10000);
+
+function aggiorna(){
+  q('nCoperti').textContent = coperti || '—';
+  q('nDisp').textContent    = telefoni || '—';
+  q('nOrdini').textContent  = ordini || '—';
+  q('nTotale').textContent  = totale ? euro(totale) : '—';
+  q('nDurata').textContent  = durata();
+  const vivo = !!apertoDa;
+  q('pallino').classList.toggle('vivo', vivo);
+  q('statoTavolo').textContent = vivo ? `Tavolo occupato` : 'Tavolo libero';
+  q('statoNota').textContent = vivo
+    ? `${coperti} ${coperti===1?'coperto':'coperti'} · aperto alle ${apertoOra||'—'}`
+    : 'in attesa che qualcuno si sieda';
+}
+let apertoOra = null;
+
+function disegna(){
+  if(!righe.length){ storia.innerHTML = '<div class="vuoto">ancora niente</div>'; return; }
+  storia.innerHTML = righe.slice().reverse().map(r=>`
+    <div class="evento">
+      <div class="ora">${r.ora}</div>
+      <div class="segno">${SEGNI[r.evento]||'·'}</div>
+      <div class="corpo"><b>${r.titolo}</b>
+        ${r.dettaglio?`<div class="dettaglio">${r.dettaglio}</div>`:''}</div>
+    </div>`).join('');
+}
+
+function evento(m){
+  let titolo = '', dettaglio = '';
+  if(m.evento==='aperto'){
+    apertoDa = Date.now(); apertoOra = m.ora; coperti = m.coperti;
+    titolo = 'Tavolo aperto';
+    dettaglio = `${m.coperti} ${m.coperti===1?'coperto rilevato':'coperti rilevati'}`;
+  } else if(m.evento==='coperti'){
+    coperti = m.coperti;
+    titolo = 'Coperti aggiornati'; dettaglio = `ora sono ${m.coperti}`;
+  } else if(m.evento==='scansione'){
+    telefoni = m.dispositivi;
+    titolo = m.nuovo ? 'Menu aperto da un nuovo telefono' : 'Menu riaperto';
+    dettaglio = `${m.dispositivi} ${m.dispositivi===1?'telefono':'telefoni'} al tavolo`;
+  } else if(m.evento==='ordine'){
+    ordini++; totale += (m.totale||0);
+    titolo = 'Ordine inviato in cucina';
+    dettaglio = m.righe.map(r=>`${r.qta}× ${r.nome}`).join(' · ')
+              + (m.totale?` — ${euro(m.totale)} euro`:'');
+  } else if(m.evento==='liberato'){
+    const d = m.durata||0;
+    titolo = 'Tavolo liberato';
+    dettaglio = d ? `servizio durato ${Math.round(d/60)} minuti` : '';
+    apertoDa = null; apertoOra = null; coperti = 0; telefoni = 0;
+    ordini = 0; totale = 0;
+    righe = [];                       // servizio chiuso, la cassa riparte pulita
+    righe.push({...m, titolo, dettaglio});
+    disegna(); aggiorna(); return;
+  } else return;
+  righe.push({...m, titolo, dettaglio});
+  disegna(); aggiorna();
+}
+
+function collega(){
+  const ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen = ()=> q('collegamento').textContent = 'collegato';
+  ws.onclose = ()=>{
+    q('collegamento').textContent = 'riconnessione…';
+    setTimeout(collega, 2000);
+  };
+  ws.onmessage = e=>{
+    const m = JSON.parse(e.data);
+    if(m.tipo === 'evento') evento(m);
+  };
+}
+collega();
+
+q('libera').onclick = async ()=>{
+  const b = q('libera'); b.disabled = true;
+  try{ await fetch('/api/libera',{method:'POST'}); }catch(e){}
+  setTimeout(()=>{ b.disabled = false; }, 1500);
+};
+</script>
+</body>
+</html>
