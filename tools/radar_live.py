@@ -218,6 +218,19 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="radar live", lifespan=lifespan)
 
 
+def ip_vero(request: Request) -> str:
+    """L'indirizzo del telefono, non quello del tunnel.
+
+    Dietro un tunnel ogni richiesta arriva da localhost: senza questo, tutti i
+    telefoni della fiera risulterebbero lo stesso apparecchio.
+    """
+    for h in ("cf-connecting-ip", "x-forwarded-for"):
+        v = request.headers.get(h)
+        if v:
+            return v.split(",")[0].strip()
+    return request.client.host if request.client else "?"
+
+
 def da_fuori(request: Request) -> bool:
     """La richiesta arriva da internet e non dalla rete di casa?
 
@@ -453,7 +466,7 @@ async def menu(tavolo: str, request: Request):
         except Exception:
             pass
     suo, nuovo = riconosci(request.cookies.get("lm_disp"),
-                           request.client.host if request.client else "?",
+                           ip_vero(request),
                            request.headers.get("user-agent", "?"))
     dispositivi[suo]["ts"].append(time.time())
     st = statistiche_scansioni()

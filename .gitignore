@@ -13,3 +13,6 @@ build/
 
 # Sistema
 .DS_Store
+
+# cloudflared: si riscarica da solo con scripts/tunnel.sh
+bin/
