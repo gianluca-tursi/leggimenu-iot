@@ -17,7 +17,10 @@ CLI="/Applications/Arduino IDE.app/Contents/Resources/app/lib/backend/resources/
 VELOCITA="${VELOCITA:-115200}"
 FQBN="${FQBN_OVERRIDE:-esp32:esp32:esp32s3:CDCOnBoot=default,FlashSize=8M,PSRAM=opi,PartitionScheme=default_8MB,USBMode=hwcdc,UploadSpeed=$VELOCITA}"
 
-SKETCH="firmware/test_radar"
+# Nessuno sketch predefinito: ce n'era uno, e un "--monitor" da solo finiva per
+# caricare uno sketch vecchio sulla scheda sbagliata senza che nessuno l'avesse
+# chiesto. Chi vuole caricare lo dice.
+SKETCH=""
 MONITOR=0
 for arg in "$@"; do
   case "$arg" in
@@ -25,6 +28,12 @@ for arg in "$@"; do
     *) SKETCH="$arg" ;;
   esac
 done
+
+if [ -z "$SKETCH" ] && [ "$MONITOR" = "0" ]; then
+  echo "uso:  $0 <cartella-sketch> [--monitor]"
+  echo "      $0 --monitor            (solo lettura, non carica niente)"
+  exit 2
+fi
 
 [ -x "$CLI" ] || { echo "arduino-cli non trovato dentro Arduino IDE.app"; exit 1; }
 
@@ -109,6 +118,25 @@ if [ -z "$PORTA" ]; then
 fi
 
 echo "porta:   $PORTA"
+
+# Le due schede si alternano sulla stessa porta e caricare sulla sbagliata e'
+# gia' successo piu' volte. Chiedo al chip chi e' prima di scrivergli addosso.
+ESPTOOL=$(find "$HOME/Library/Arduino15/packages/esp32" -name esptool -type f 2>/dev/null | head -1)
+if [ -n "$ESPTOOL" ]; then
+  CHIP=$("$ESPTOOL" --port "$PORTA" chip_id 2>/dev/null | sed -n 's/^Chip is \([A-Za-z0-9-]*\).*/\1/p' | head -1)
+  case "$FQBN:$CHIP" in
+    *esp32s3*:ESP32-S3) ;;
+    *esp32s3*:ESP32*)
+      echo "Sulla porta c'e' un $CHIP, ma questo script carica per ESP32-S3."
+      echo "Per il Freenove usa:  ./scripts/flash-freenove.sh $SKETCH"
+      exit 1 ;;
+  esac
+  [ -n "$CHIP" ] && echo "scheda:  $CHIP"
+fi
+
+if [ -z "$SKETCH" ]; then
+  MONITOR=1
+else
 echo "sketch:  $SKETCH"
 echo
 "$CLI" compile --fqbn "$FQBN" "$SKETCH"
@@ -117,6 +145,7 @@ echo "carico..."
 "$CLI" upload -p "$PORTA" --fqbn "$FQBN" "$SKETCH"
 echo
 echo "✅ caricato."
+fi
 
 if [ "$MONITOR" = "1" ]; then
   echo "monitor seriale a 115200 — ctrl-C per uscire"
