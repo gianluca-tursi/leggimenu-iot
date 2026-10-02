@@ -24,7 +24,7 @@ from pathlib import Path
 import serial
 import uvicorn
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 QUI = Path(__file__).parent
 RE_N = re.compile(r"bersagli:\s*(\d+)")
@@ -216,6 +216,39 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="radar live", lifespan=lifespan)
+
+
+def da_fuori(request: Request) -> bool:
+    """La richiesta arriva da internet e non dalla rete di casa?
+
+    In fiera il menu deve essere raggiungibile dal telefono di chiunque, quindi
+    il server finisce dietro un tunnel pubblico. Ma allora diventano pubbliche
+    anche la cassa e i comandi: chiunque inquadri il QR potrebbe curiosare e
+    premere "libera il tavolo" mentre la gente mangia.
+
+    Un tunnel inoltra tutto a localhost, quindi guardare l'indirizzo del
+    chiamante non basta: tutto sembrerebbe locale. Le intestazioni che il
+    tunnel aggiunge invece ci sono solo quando si arriva da fuori.
+    """
+    if request.headers.get("x-forwarded-for") or request.headers.get("cf-connecting-ip"):
+        return True
+    ip = request.client.host if request.client else ""
+    return not (ip.startswith(("127.", "10.", "192.168.", "::1"))
+                or ip.startswith(tuple(f"172.{n}." for n in range(16, 32))))
+
+
+SOLO_IN_CASA = "questa pagina si apre solo dalla rete del locale"
+
+
+@app.middleware("http")
+async def chiudi_il_gestionale(request: Request, call_next):
+    """Dal tunnel passa solo quello che serve al cliente: menu e ordini."""
+    via = request.url.path
+    pubblico = (via.startswith("/m/") or via == "/api/ordine"
+                or via.startswith("/static"))
+    if not pubblico and da_fuori(request):
+        return JSONResponse({"errore": SOLO_IN_CASA}, status_code=403)
+    return await call_next(request)
 clienti: set[WebSocket] = set()
 seriale_aperta: list = []          # la Serial viva, per poter mandare comandi
 ultimo = {"ts": 0.0, "bersagli": [], "n": 0}
