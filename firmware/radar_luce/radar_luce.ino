@@ -480,6 +480,22 @@ static void eseguiRiga(const char *r) {
     else             Serial.printf(">>> al pannello: %s\n", r);
     return;
   }
+  // "K:<n>" -> i coperti li ha confermati il cameriere dalla cassa, e la sua
+  // parola vale piu' di quella del radar: lui li ha contati guardandoli.
+  if (r[0] == 'K' && r[1] == ':') {
+    int n = atoi(r + 2);
+    if (n < 0) n = 0;
+    if (n > NUM_LED) n = NUM_LED;
+    copertiTavolo = n;
+    tavoloAperto = n > 0;
+    accesiOra = n;
+    if (n > 0) { avviaStrisciata(n, n); Serial1.printf("T:%d\n", n); }
+    else       { animGiri = 0; accendi(0); Serial1.println("L"); }
+    ultimoAnnuncio = millis();
+    Serial.printf(">>> coperti confermati dalla cassa: %d\n", n);
+    return;
+  }
+
   // "A:<secondi>" -> la pausa dopo la liberazione, la gestisco io
   if (r[0] == 'A' && r[1] == ':') {
     long sec = atol(r + 2);

@@ -736,6 +736,26 @@ async def ordine_stato(dati: dict):
     return {"ok": True}
 
 
+@app.post("/api/coperti")
+async def coperti(dati: dict):
+    """I coperti confermati dal cameriere, che ha contato guardandoli."""
+    try:
+        n = max(0, min(8, int(dati.get("n", 0))))
+    except (TypeError, ValueError):
+        return {"ok": False, "motivo": "non e' un numero"}
+    if apertura:
+        apertura[1] = n
+    else:
+        apertura[:] = [time.time(), n]
+    await manda_a_tutti(registra_evento("confermati", coperti=n))
+    if seriale_aperta:
+        try:
+            seriale_aperta[0].write(f"K:{n}\n".encode())
+        except Exception as e:
+            return {"ok": True, "nodo": f"non raggiunto: {e}"}
+    return {"ok": True}
+
+
 @app.post("/api/menu")
 async def rimetti_menu():
     """Rimette il QR del menu sul pannello, da qualunque schermata."""

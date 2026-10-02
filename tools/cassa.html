@@ -58,6 +58,23 @@
     padding:3px 0;font-size:14px}
   .riga-piatto span{color:var(--tenue);font-variant-numeric:tabular-nums}
 
+  .velo{position:fixed;inset:0;background:rgba(0,0,0,.35);backdrop-filter:blur(3px);
+    display:none;align-items:center;justify-content:center;padding:20px;z-index:9}
+  .velo.aperto{display:flex}
+  .modale{background:var(--carta);border-radius:20px;padding:26px 24px;
+    max-width:380px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.25);
+    animation:sali .22s ease-out}
+  @keyframes sali{from{opacity:0;transform:translateY(14px) scale(.98)}}
+  .modale h3{margin:0 0 6px;font-size:21px;font-weight:600;letter-spacing:-.02em}
+  .modale p{margin:0 0 20px;color:var(--tenue);font-size:14px}
+  .scelte{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-bottom:20px}
+  .scelte button{appearance:none;border:1px solid var(--riga);background:transparent;
+    color:var(--testo);border-radius:13px;padding:15px 0;font-size:18px;
+    font-weight:600;font-family:inherit;cursor:pointer;font-variant-numeric:tabular-nums}
+  .scelte button.scelto{background:var(--accento);border-color:var(--accento);color:#fff}
+  .modale .fondo{display:flex;gap:9px}
+  .modale .fondo button{flex:1}
+
   .etichetta{display:inline-block;padding:4px 11px;border-radius:99px;
     font-size:12px;font-weight:600;letter-spacing:.01em;
     background:var(--riga);color:var(--tenue)}
@@ -134,13 +151,25 @@
     <div class="azioni" id="azioni"></div>
   </div>
 
+  <div class="velo" id="velo">
+    <div class="modale">
+      <h3>Qualcuno si è seduto</h3>
+      <p id="modaleNota">Il sensore ne ha rilevato uno. Quanti sono davvero?</p>
+      <div class="scelte" id="scelte"></div>
+      <div class="fondo">
+        <button class="pulsante quieto" id="annullaApertura">Non è nessuno</button>
+        <button class="pulsante" id="confermaApertura">Apri il tavolo</button>
+      </div>
+    </div>
+  </div>
+
   <h2>Cos'è successo</h2>
   <div class="carta" id="storia"><div class="vuoto">ancora niente</div></div>
 
 </div>
 <script>
 const SEGNI = {aperto:'●', coperti:'●', scansione:'◆', ordine:'■',
-               stato:'▸', vino:'◇', liberato:'○'};
+               stato:'▸', vino:'◇', confermati:'✓', liberato:'○'};
 let apertoDa = null, ordini = 0, totale = 0, coperti = 0, telefoni = 0;
 let riaperture = 0, ogniSec = 0;
 const storia = document.getElementById('storia');
@@ -193,6 +222,7 @@ function evento(m){
   if(m.evento==='aperto'){
     apertoDa = Date.now(); apertoOra = m.ora; coperti = m.coperti;
     segna('aperto', m.ts);
+    apriModale(m.coperti);
     titolo = 'Tavolo aperto';
     dettaglio = `${m.coperti} ${m.coperti===1?'coperto rilevato':'coperti rilevati'}`;
   } else if(m.evento==='coperti'){
@@ -215,6 +245,10 @@ function evento(m){
   } else if(m.evento==='vino'){
     titolo = 'Abbinamento proposto';
     dettaglio = `${m.nome} (${m.colore}) · ${m.quanto} — ${m.motivo}`;
+  } else if(m.evento==='confermati'){
+    coperti = m.coperti; tavoloConfermato = true;
+    titolo = 'Coperti confermati in sala';
+    dettaglio = `${m.coperti} ${m.coperti===1?'coperto':'coperti'}`;
   } else if(m.evento==='stato'){
     if(['servito','conto','pagato'].includes(m.stato)) segna(m.stato, m.ts);
     const f = FLUSSO[m.stato];
@@ -227,6 +261,7 @@ function evento(m){
     dettaglio = d ? `servizio durato ${Math.round(d/60)} minuti` : '';
     apertoDa = null; apertoOra = null; coperti = 0; telefoni = 0;
     ordini = 0; totale = 0; riaperture = 0; ogniSec = 0;
+    tavoloConfermato = false; chiudiModale();
     ordineVivo = null; disegnaOrdine();
     righe = [];                       // servizio chiuso, la cassa riparte pulita
     Object.keys(raggiunte).forEach(k => delete raggiunte[k]);
@@ -341,6 +376,44 @@ q('azioni').onclick = async e=>{
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({stato:b.dataset.stato})});
   }catch(err){ b.disabled = false; }
+};
+
+// Il radar propone, il cameriere decide. E' anche il modo onesto di convivere
+// col limite del sensore, che attorno a un tavolo rotondo vede meno persone di
+// quante ce ne siano: chi e' in sala li ha contati guardandoli.
+let scelto = 0, tavoloConfermato = false;
+
+function apriModale(rilevati){
+  if(tavoloConfermato) return;
+  scelto = Math.max(1, rilevati || 1);
+  q('modaleNota').textContent = rilevati
+    ? `Il sensore ne ha rilevat${rilevati===1?'o uno':'i '+rilevati}. Quanti sono davvero?`
+    : 'Quante persone si sono sedute?';
+  q('scelte').innerHTML = [1,2,3,4,5,6,7,8].map(n=>
+    `<button data-n="${n}" class="${n===scelto?'scelto':''}">${n}</button>`).join('');
+  q('velo').classList.add('aperto');
+}
+function chiudiModale(){ q('velo').classList.remove('aperto'); }
+
+q('scelte').onclick = e=>{
+  const b = e.target.closest('button[data-n]'); if(!b) return;
+  scelto = +b.dataset.n;
+  [...q('scelte').children].forEach(x=>
+    x.classList.toggle('scelto', x === b));
+};
+
+q('confermaApertura').onclick = async ()=>{
+  tavoloConfermato = true; chiudiModale();
+  try{
+    await fetch('/api/coperti',{method:'POST',
+      headers:{'Content-Type':'application/json'}, body:JSON.stringify({n:scelto})});
+  }catch(e){}
+};
+
+q('annullaApertura').onclick = async ()=>{
+  chiudiModale();
+  // Non era nessuno: chiudo il tavolo invece di lasciarlo aperto a vuoto.
+  try{ await fetch('/api/libera',{method:'POST'}); }catch(e){}
 };
 
 function collega(){
