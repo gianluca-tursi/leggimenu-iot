@@ -1,0 +1,27 @@
+{
+  "ristorante": "Trattoria Demo — leggimenu",
+  "piatti": [
+    {"id": "ant-01", "nome": "Tagliere di salumi e pecorino", "categoria": "antipasto", "prezzo": 14.0,
+     "tag": ["salato", "grasso", "stagionato", "carne"]},
+    {"id": "ant-02", "nome": "Alici marinate e burrata", "categoria": "antipasto", "prezzo": 12.0,
+     "tag": ["pesce", "acido", "fresco", "latticino"]},
+    {"id": "pri-01", "nome": "Cacio e pepe", "categoria": "primo", "prezzo": 13.0,
+     "tag": ["grasso", "latticino", "pepato", "vegetariano"]},
+    {"id": "pri-02", "nome": "Spaghetti alle vongole", "categoria": "primo", "prezzo": 16.0,
+     "tag": ["pesce", "delicato", "aglio", "fresco"]},
+    {"id": "pri-03", "nome": "Tagliatelle al ragu di cinghiale", "categoria": "primo", "prezzo": 15.0,
+     "tag": ["carne_rossa", "selvaggina", "strutturato", "speziato"]},
+    {"id": "sec-01", "nome": "Tagliata di manzo al rosmarino", "categoria": "secondo", "prezzo": 24.0,
+     "tag": ["carne_rossa", "grigliato", "strutturato"]},
+    {"id": "sec-02", "nome": "Branzino al forno con patate", "categoria": "secondo", "prezzo": 22.0,
+     "tag": ["pesce", "delicato", "erbe"]},
+    {"id": "sec-03", "nome": "Parmigiana di melanzane", "categoria": "secondo", "prezzo": 14.0,
+     "tag": ["vegetariano", "pomodoro", "latticino", "grasso"]},
+    {"id": "piz-01", "nome": "Pizza diavola", "categoria": "pizza", "prezzo": 11.0,
+     "tag": ["piccante", "pomodoro", "latticino", "salume"]},
+    {"id": "dol-01", "nome": "Tiramisu della casa", "categoria": "dolce", "prezzo": 7.0,
+     "tag": ["dolce", "cremoso", "caffe"]},
+    {"id": "dol-02", "nome": "Cantucci e frutta secca", "categoria": "dolce", "prezzo": 6.0,
+     "tag": ["dolce", "secco", "mandorla"]}
+  ]
+}

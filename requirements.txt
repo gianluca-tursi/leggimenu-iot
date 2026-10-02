@@ -1,0 +1,17 @@
+# leggimenu - quello che serve sul Mac che fa da server
+#
+# Installazione su una macchina nuova:
+#   python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+# oppure, piu' semplice:  ./scripts/installa.sh
+
+fastapi>=0.110
+uvicorn[standard]>=0.27
+websockets>=12.0
+pyserial>=3.5          # legge il nodo radar sulla porta USB. Serve QUI, sul Mac:
+                       # per mesi questo file ha detto "solo sul Raspberry" ed
+                       # era sbagliato, il server non parte senza.
+
+# Solo per diagnosticare i QR fuori dal dispositivo (generarli e rileggerli).
+# Non servono per far funzionare il sistema.
+pillow>=10.0
+qrcode>=7.4

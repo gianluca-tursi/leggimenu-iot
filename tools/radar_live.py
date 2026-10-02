@@ -1,0 +1,497 @@
+#!/usr/bin/env python3
+"""Radar live: legge l'LD2450 dalla seriale e lo mostra nel browser.
+
+    ./scripts/radar-live.sh          ->  http://localhost:8080
+
+Il nodo continua a stampare il suo testo di diagnosi: qui lo parsiamo e lo
+ributtiamo fuori come JSON su WebSocket, cosi' la pagina disegna in tempo reale.
+"""
+from __future__ import annotations
+
+import atexit
+import os
+import pathlib
+import asyncio
+import glob
+import json
+import math
+import re
+import time
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+import serial
+import uvicorn
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, HTMLResponse
+
+QUI = Path(__file__).parent
+RE_N = re.compile(r"bersagli:\s*(\d+)")
+RE_T = re.compile(r"\[(\d)\]\s*x=(-?\d+)cm\s+y=(-?\d+)cm\s+dist=([\d.]+)cm\s+v=(-?\d+)")
+# La riga di diagnosi dello sketch: la inoltro anch'io, cosi' la pagina sa
+# distinguere "radar muto" da "dashboard rotta".
+# accetta sia il vecchio formato sia quello nuovo del firmware nodo_wifi
+RE_D = re.compile(r"byte(?: ricevuti:)?[=\s]+(\d+).*?frame(?: validi:)?[=\s]+(\d+)")
+RE_RETE  = re.compile(r"ip=(\S+)\s+rssi=(-?\d+)")
+RE_RADAR = re.compile(r"radar=(ok|MUTO)")
+RE_FASE = re.compile(r"fase:\s*(\w+)\s+cand=(\d+)\s+conf=(\d+)\s+manca=([\d.]+)")
+# Quanti LED il firmware crede di aver acceso. Serve per capire, quando la
+# striscia resta spenta, se sbaglia il programma o se sbaglia il filo.
+RE_LUCE = re.compile(r">>> luce:\s*(\d+)")
+# La pausa dopo la liberazione, in secondi. La ricordo perche' una dashboard
+# aperta dopo l'avvio del nodo non vedrebbe mai il valore corrente.
+RE_PAUSA = re.compile(r"\[pausa\]\s*(\d+)")
+
+PAGINA_MENU = """<!doctype html><html lang="it"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>leggimenu - Tavolo {{tavolo}}</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.5 -apple-system,system-ui,sans-serif;background:#faf8f5;color:#231f1c}
+.t{padding:26px 20px 120px}
+h1{margin:0 0 2px;font-size:26px}.s{color:#8a807a;font-size:14px;margin-bottom:22px}
+.p{border-top:1px solid #e6e0d8;padding:13px 0;display:flex;align-items:center;gap:12px}
+.p .n{flex:1}.p b{font-weight:600;display:block}.p .e{color:#8a807a;font-size:14px}
+.q{display:flex;align-items:center;gap:10px}
+.q button{width:34px;height:34px;border-radius:17px;border:1px solid #d6cec3;
+  background:#fff;font-size:19px;line-height:1;color:#231f1c}
+.q span{min-width:16px;text-align:center;font-variant-numeric:tabular-nums}
+.b{position:fixed;left:0;right:0;bottom:0;padding:14px 20px 26px;background:#fff;
+  border-top:1px solid #e6e0d8}
+.b button{width:100%;padding:15px;border:0;border-radius:11px;background:#1f7a3f;
+  color:#fff;font-size:17px;font-weight:600}
+.b button:disabled{background:#cfcac3}
+.m{text-align:center;color:#8a807a;font-size:14px;margin-top:9px;min-height:19px}
+</style></head><body><div class="t">
+<h1>leggimenu</h1><div class="s">Tavolo {{tavolo}}</div>
+<div id="lista"></div></div>
+<div class="b"><button id="invia" disabled>Invia l'ordine</button>
+<div class="m" id="msg"></div></div>
+<script>
+const PIATTI=[["Tagliere del casaro",14],["Cacio e pepe",13],
+              ["Coda alla vaccinara",18],["Carciofo alla giudia",7],
+              ["Maritozzo",6]];
+const qta=PIATTI.map(()=>0);
+const lista=document.getElementById('lista');
+PIATTI.forEach((p,i)=>{
+  const d=document.createElement('div'); d.className='p';
+  d.innerHTML=`<div class="n"><b>${p[0]}</b><span class="e">${p[1]} euro</span></div>
+    <div class="q"><button data-i="${i}" data-d="-1">&minus;</button>
+    <span id="q${i}">0</span><button data-i="${i}" data-d="1">+</button></div>`;
+  lista.appendChild(d);
+});
+lista.onclick=e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  const i=+b.dataset.i;
+  qta[i]=Math.max(0,Math.min(9,qta[i]+ +b.dataset.d));
+  document.getElementById('q'+i).textContent=qta[i];
+  document.getElementById('invia').disabled = qta.every(q=>q===0);
+};
+document.getElementById('invia').onclick=async()=>{
+  const righe=PIATTI.map((p,i)=>({nome:p[0],qta:qta[i],prezzo:p[1]})).filter(r=>r.qta>0);
+  const msg=document.getElementById('msg'), bot=document.getElementById('invia');
+  bot.disabled=true; msg.textContent='invio...';
+  try{
+    const r=await fetch('/api/ordine',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({tavolo:'{{tavolo}}',righe})});
+    const d=await r.json();
+    msg.textContent = d.ok ? 'Ordine inviato in cucina' : ('non riuscito: '+(d.motivo||'?'));
+  }catch(e){ msg.textContent='non riuscito: '+e; bot.disabled=false; }
+};
+</script></body></html>"""
+ultima_pausa: list[int] = []
+PORTA_HTTP: list[int] = []
+
+# File di PID: identifica la dashboard in modo inequivocabile. Cercarla con
+# "pgrep -f radar_live.py" non funziona, perche' quel pattern matcha anche la
+# shell che sta eseguendo il comando in cui compare la stringa - e un pkill
+# dello stesso tipo si porta via la shell stessa.
+FILE_PID = pathlib.Path("/tmp/leggimenu-dashboard.pid")
+# Il WiFi si offre una volta sola per sessione al tavolo: alla seconda
+# scansione il cliente lo ha gia' visto, e ripeterglielo gli toglierebbe il
+# QR del menu proprio mentre lo sta usando. Si riarma quando il tavolo si libera.
+wifi_offerto: list[bool] = [False]
+# Quanti bersagli fissi il firmware sta scartando come arredamento.
+RE_FISSI = re.compile(r"\[fissi\]\s*ignorati=(\d+)\s+taratura=(\w+)")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    coda: asyncio.Queue = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(None, leggi_seriale, coda, loop)
+
+    async def pompa() -> None:
+        while True:
+            msg = await coda.get()
+            if msg.get("tipo") == "frame":
+                ultimo.update(msg)
+            await diffondi(msg)
+
+    task = asyncio.create_task(pompa())
+    yield
+    task.cancel()
+
+
+app = FastAPI(title="radar live", lifespan=lifespan)
+clienti: set[WebSocket] = set()
+seriale_aperta: list = []          # la Serial viva, per poter mandare comandi
+ultimo = {"ts": 0.0, "bersagli": [], "n": 0}
+
+
+def trova_porta() -> str | None:
+    p = [x for x in glob.glob("/dev/cu.*")
+         if any(k in x for k in ("wchusbserial", "usbmodem", "usbserial", "SLAB"))]
+    return p[0] if p else None
+
+
+async def diffondi(msg: dict) -> None:
+    testo = json.dumps(msg)
+    for ws in list(clienti):
+        try:
+            await ws.send_text(testo)
+        except Exception:
+            clienti.discard(ws)
+
+
+def leggi_seriale(coda: asyncio.Queue, loop: asyncio.AbstractEventLoop) -> None:
+    """Gira in un thread: la seriale e' bloccante, l'event loop no."""
+    porta = None
+    ser = None
+    parziale = ""
+    gruppo: list[dict] = []
+    attesi = 0
+    ultima_fase: dict = {}
+
+    while True:
+        if ser is None:
+            porta = trova_porta()
+            if porta is None:
+                loop.call_soon_threadsafe(coda.put_nowait,
+                                          {"tipo": "stato", "collegato": False})
+                time.sleep(1.5)
+                continue
+            try:
+                ser = serial.Serial(porta, 115200, timeout=0.3)
+                ser.setDTR(False); ser.setRTS(False)
+                seriale_aperta.clear(); seriale_aperta.append(ser)
+                loop.call_soon_threadsafe(coda.put_nowait,
+                                          {"tipo": "stato", "collegato": True, "porta": porta})
+            except Exception:
+                ser = None
+                time.sleep(1.5)
+                continue
+        try:
+            dati = ser.read(2048).decode("utf-8", "replace")
+        except Exception:
+            try: ser.close()
+            except Exception: pass
+            ser = None
+            continue
+        if not dati:
+            continue
+
+        parziale += dati
+        *linee, parziale = parziale.split("\n")
+        for riga in linee:
+            m = RE_N.search(riga)
+            if m:
+                if attesi or gruppo:      # chiudo il gruppo precedente
+                    loop.call_soon_threadsafe(coda.put_nowait, {
+                        "tipo": "frame", "ts": time.time(),
+                        "bersagli": gruppo, "n": len(gruppo), **ultima_fase})
+                gruppo = []
+                attesi = int(m.group(1))
+                if attesi == 0:
+                    loop.call_soon_threadsafe(coda.put_nowait, {
+                        "tipo": "frame", "ts": time.time(), "bersagli": [], "n": 0,
+                        **ultima_fase})
+                continue
+            fx = RE_FISSI.search(riga)
+            if fx:
+                loop.call_soon_threadsafe(coda.put_nowait,
+                    {"tipo": "fissi", "n": int(fx.group(1)),
+                     "taratura": fx.group(2) == "si"})
+                continue
+            pa = RE_PAUSA.search(riga)
+            if pa:
+                ultima_pausa[:] = [int(pa.group(1))]
+                loop.call_soon_threadsafe(coda.put_nowait,
+                                          {"tipo": "pausa", "secondi": int(pa.group(1))})
+                continue
+            lc = RE_LUCE.search(riga)
+            if lc:
+                loop.call_soon_threadsafe(coda.put_nowait,
+                                          {"tipo": "luce", "led": int(lc.group(1))})
+                continue
+            fs = RE_FASE.search(riga)
+            if fs:
+                ultima_fase = {"fase": fs.group(1), "candidati": int(fs.group(2)),
+                               "confermati": int(fs.group(3)), "manca": float(fs.group(4))}
+                continue
+            dg = RE_D.search(riga)
+            if dg:
+                msg = {"tipo": "diagnosi", "byte": int(dg.group(1)),
+                       "frame": int(dg.group(2))}
+                rete = RE_RETE.search(riga)
+                if rete:
+                    msg["ip"] = rete.group(1)
+                    msg["rssi"] = int(rete.group(2))
+                rad = RE_RADAR.search(riga)
+                if rad:
+                    msg["radar"] = (rad.group(1) == "ok")
+                loop.call_soon_threadsafe(coda.put_nowait, msg)
+                continue
+            t = RE_T.search(riga)
+            if t:
+                x, y = int(t.group(2)), int(t.group(3))
+                gruppo.append({
+                    "id": int(t.group(1)), "x": x, "y": y,
+                    "dist": float(t.group(4)), "v": int(t.group(5)),
+                    "ang": round(math.degrees(math.atan2(x, max(y, 1))), 1),
+                })
+
+
+@app.post("/api/reset")
+async def reset():
+    """Il tasto "nuova prova": manda 'R' al nodo, che azzera la sequenza."""
+    if not seriale_aperta:
+        return {"ok": False, "motivo": "nodo non collegato"}
+    try:
+        seriale_aperta[0].write(b"R\n")
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "motivo": str(e)}
+
+
+@app.post("/api/libera")
+async def libera():
+    """Il pasto e' finito: chiude il tavolo e rimanda il pannello a "prenotato"."""
+    if not seriale_aperta:
+        return {"ok": False, "motivo": "nodo non collegato"}
+    try:
+        seriale_aperta[0].write(b"F\n")
+        wifi_offerto[0] = False        # tavolo nuovo, suggerimento di nuovo utile
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "motivo": str(e)}
+
+
+def _ip_locale() -> str:
+    """L'indirizzo del Mac sulla rete di casa: il telefono deve raggiungerlo,
+    quindi 127.0.0.1 non serve a niente. Non apro davvero la connessione."""
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        return s.getsockname()[0]
+    except Exception:
+        return "127.0.0.1"
+    finally:
+        s.close()
+
+
+@app.get("/api/rete")
+async def rete():
+    """Dove puntare il QR del menu, gia' pronto da incollare."""
+    return {"ip": _ip_locale(), "porta": PORTA_HTTP[0] if PORTA_HTTP else 8080}
+
+
+@app.get("/m/{tavolo}")
+async def menu(tavolo: str):
+    """La pagina che si apre inquadrando il QR sul pannello.
+
+    E' anche il rilevatore: se qualcuno la chiede, qualcuno ha scansionato.
+    Avviso il nodo, che accende la schermata del WiFi sul pannello."""
+    primo = not wifi_offerto[0]
+    if primo and seriale_aperta:
+        try:
+            seriale_aperta[0].write(b"W\n")
+            wifi_offerto[0] = True
+        except Exception:
+            pass
+    for c in list(clienti):
+        try:
+            await c.send_json({"tipo": "scansione", "tavolo": tavolo, "primo": primo})
+        except Exception:
+            pass
+    return HTMLResponse(PAGINA_MENU.replace("{{tavolo}}", tavolo))
+
+
+@app.post("/api/qr")
+async def qr(dati: dict):
+    """Indirizzo del menu e credenziali della rete da mettere nei due QR."""
+    if not seriale_aperta:
+        return {"ok": False, "motivo": "nodo non collegato"}
+    righe = []
+    url = (dati.get("url") or "").strip()
+    if url:
+        righe.append(f"U:{url}\n".encode())
+    ssid = (dati.get("ssid") or "").strip()
+    if ssid:
+        # Formato standard riconosciuto da iOS e Android per entrare in rete.
+        chiave = (dati.get("password") or "").strip()
+        righe.append(f"Q:WIFI:T:WPA;S:{ssid};P:{chiave};;\n".encode())
+    if not righe:
+        return {"ok": False, "motivo": "niente da mandare"}
+    try:
+        for r in righe:
+            seriale_aperta[0].write(r)
+            time.sleep(0.05)
+        return {"ok": True, "mandate": len(righe)}
+    except Exception as e:
+        return {"ok": False, "motivo": str(e)}
+
+
+@app.post("/api/ordine")
+async def ordine(dati: dict):
+    """L'ordine mandato dal telefono: va alla cassa e sul pannello del tavolo."""
+    righe = dati.get("righe") or []
+    tavolo = str(dati.get("tavolo", "?"))
+    if not righe:
+        return {"ok": False, "motivo": "ordine vuoto"}
+
+    for c in list(clienti):
+        try:
+            await c.send_json({"tipo": "ordine", "tavolo": tavolo, "righe": righe,
+                               "quando": time.strftime("%H:%M:%S")})
+        except Exception:
+            pass
+
+    if seriale_aperta:
+        try:
+            seriale_aperta[0].write(b"Z\n")          # azzera la lista di prima
+            time.sleep(0.05)
+            for r in righe[:8]:
+                q = int(r.get("qta", 1))
+                # Il pannello ha 27 caratteri per riga: tagliare qui e' meglio
+                # che far sbordare il testo fuori dallo schermo.
+                testo = f"{q}x {r.get('nome','')}"[:27]
+                seriale_aperta[0].write(f"V:{testo}\n".encode())
+                time.sleep(0.05)
+            seriale_aperta[0].write(b"X\n")          # mostra la schermata
+        except Exception as e:
+            return {"ok": True, "pannello": f"non raggiunto: {e}"}
+    return {"ok": True}
+
+
+@app.post("/api/pausa")
+async def pausa(dati: dict):
+    """Quanti secondi ignorare il radar dopo "il pasto e' finito"."""
+    if not seriale_aperta:
+        return {"ok": False, "motivo": "nodo non collegato"}
+    try:
+        sec = max(0, min(600, int(dati.get("secondi", 5))))
+    except (TypeError, ValueError):
+        return {"ok": False, "motivo": "non e' un numero"}
+    try:
+        seriale_aperta[0].write(f"A:{sec}\n".encode())
+        return {"ok": True, "secondi": sec}
+    except Exception as e:
+        return {"ok": False, "motivo": str(e)}
+
+
+@app.post("/api/tavolo")
+async def tavolo(dati: dict):
+    """Nome, orario e ospite del tavolo: il nodo li inoltra al pannello."""
+    if not seriale_aperta:
+        return {"ok": False, "motivo": "nodo non collegato"}
+    righe = []
+    for chiave, lettera in (("nome", "N"), ("orario", "O"), ("ospite", "G")):
+        testo = (dati.get(chiave) or "").strip()
+        if testo:
+            righe.append(f"{lettera}:{testo}\n".encode())
+    if not righe:
+        return {"ok": False, "motivo": "niente da mandare"}
+    try:
+        for r in righe:
+            seriale_aperta[0].write(r)
+            time.sleep(0.05)          # il pannello legge riga per riga
+        return {"ok": True, "mandate": len(righe)}
+    except Exception as e:
+        return {"ok": False, "motivo": str(e)}
+
+
+@app.get("/")
+async def pagina() -> FileResponse:
+    return FileResponse(QUI / "radar_live.html")
+
+
+@app.websocket("/ws")
+async def ws(sock: WebSocket) -> None:
+    await sock.accept()
+    clienti.add(sock)
+    if ultima_pausa:                     # stato iniziale per chi arriva dopo
+        await sock.send_json({"tipo": "pausa", "secondi": ultima_pausa[0]})
+    try:
+        while True:
+            await sock.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        clienti.discard(sock)
+
+
+def main() -> None:
+    import os
+    import socket
+    import sys
+
+    porta_http = 8080
+    # Se 8080 e' gia' occupata (spesso una copia di questo stesso script rimasta
+    # aperta), lo dico chiaro e passo alla prima porta libera invece di morire.
+    def libera(n: int) -> bool:
+        with socket.socket() as s_:
+            s_.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s_.bind(("127.0.0.1", n))
+                return True
+            except OSError:
+                return False
+
+    if not libera(porta_http):
+        # Se a tenerla e' un'altra copia di questa dashboard, NON ne apro una
+        # seconda: la seriale puo' aprirla un processo solo, e la seconda
+        # resterebbe muta per sempre confondendo le idee.
+        import subprocess
+        try:
+            altre = subprocess.run(["pgrep", "-f", "radar_live.py"],
+                                   capture_output=True, text=True).stdout.split()
+        except Exception:
+            altre = []
+        mie = [x for x in altre if int(x) != os.getpid()]
+
+        if mie:
+            print(f"⚠️  Hai gia' una dashboard aperta (PID {', '.join(mie)}).")
+            print()
+            print("   La porta seriale puo' usarla un processo solo, quindi una")
+            print("   seconda copia resterebbe muta. Scegli:")
+            print()
+            print(f"   - usa quella gia' aperta:  http://localhost:{porta_http}")
+            print("   - oppure chiudila (Ctrl-C nel suo terminale) e rilancia")
+            sys.exit(0)
+
+        for n in range(8081, 8091):
+            if libera(n):
+                porta_http = n
+                print(f"⚠️  la {8080} e' occupata da qualcun altro: uso la {porta_http}.\n")
+                break
+        else:
+            sys.exit("Nessuna porta libera fra 8080 e 8090.")
+
+    p = trova_porta()
+    print(f"porta seriale: {p or 'NON TROVATA (attacca il nodo, la cerco da solo)'}")
+    PORTA_HTTP[:] = [porta_http]
+    FILE_PID.write_text(str(os.getpid()))
+    atexit.register(lambda: FILE_PID.unlink(missing_ok=True))
+    ip = _ip_locale()
+    print(f"dashboard:     http://localhost:{porta_http}")
+    print(f"dal telefono:  http://{ip}:{porta_http}")
+    # Ascolto su tutte le interfacce, non solo su localhost: il QR sul pannello
+    # lo inquadra un telefono, che deve poter arrivare qui dalla rete di casa.
+    # Sulla rete locale la dashboard diventa quindi visibile a chi ci sta sopra.
+    uvicorn.run(app, host="0.0.0.0", port=porta_http, log_level="warning")
+
+
+if __name__ == "__main__":
+    main()

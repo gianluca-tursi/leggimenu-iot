@@ -1,0 +1,15 @@
+{
+  "tavolo": "T07",
+  "server": "http://192.168.1.50:8000",
+  "display": {
+    "tipo": "waveshare",
+    "modello": "epd4in2_V2",
+    "larghezza": 400,
+    "altezza": 300
+  },
+  "sensori": {
+    "intervallo_s": 0.5,
+    "pir": {"attivo": true, "pin": 17},
+    "ld2450": {"attivo": true, "porta": "/dev/serial0", "raggio_cm": 140}
+  }
+}

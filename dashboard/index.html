@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>leggimenu · cassa</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">leggimenu<span class="dot">·</span><em>cassa</em></div>
+  <div class="stato-conn"><span id="led" class="led"></span><span id="conn">connessione…</span></div>
+</header>
+
+<main class="layout">
+  <section class="sala">
+    <h2 class="sezione">Sala</h2>
+    <div id="tavoli" class="griglia"></div>
+    <h2 class="sezione">Attività</h2>
+    <ul id="eventi" class="eventi"></ul>
+  </section>
+
+  <aside class="pannello">
+    <div class="card">
+      <div class="card-head">
+        <h3>Display al tavolo</h3>
+        <select id="sel-tavolo"></select>
+      </div>
+      <div class="eink"><img id="anteprima" alt="anteprima e-ink"></div>
+      <p class="hint" id="hint-anteprima">In attesa del nodo…</p>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Simulatore sensori</h3></div>
+      <p class="hint">Serve finché il Pi non è sul tavolo: finge PIR e radar.</p>
+      <div class="sim-row">
+        <button id="sim-seduti" class="btn primario">Si siedono</button>
+        <button id="sim-vanno" class="btn">Se ne vanno</button>
+      </div>
+      <label class="slider">Persone rilevate dal radar <b id="sim-n">2</b>
+        <input id="sim-target" type="range" min="1" max="6" value="2">
+      </label>
+      <label class="check"><input id="sim-auto" type="checkbox" checked> invia presenza ogni 2s</label>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Ordina (finto POS)</h3></div>
+      <select id="sel-piatto"></select>
+      <button id="btn-ordina" class="btn primario largo">Aggiungi all'ordine</button>
+    </div>
+  </aside>
+</main>
+
+<template id="tpl-tavolo">
+  <article class="tavolo">
+    <div class="t-head">
+      <div>
+        <span class="t-nome"></span>
+        <span class="t-sala"></span>
+      </div>
+      <span class="badge"></span>
+    </div>
+    <div class="t-sensori">
+      <span class="pill pir">PIR</span>
+      <span class="pill radar">radar</span>
+      <span class="pill nodo">nodo</span>
+      <span class="t-coperti"></span>
+    </div>
+    <ul class="t-ordine"></ul>
+    <div class="t-vino"></div>
+    <div class="t-foot">
+      <span class="t-totale"></span>
+      <div class="t-azioni"></div>
+    </div>
+  </article>
+</template>
+
+<script src="/app.js"></script>
+</body>
+</html>

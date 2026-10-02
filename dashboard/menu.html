@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>leggimenu</title>
+<style>
+:root{--bg:#faf8f5;--carta:#fff;--testo:#1d1b18;--tenue:#7d766c;--bordo:#e8e2d8;--accento:#8c2f2f;--ok:#2f7a53}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--testo);
+  font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;padding-bottom:96px}
+header{padding:20px 18px 14px;border-bottom:1px solid var(--bordo);background:var(--carta);
+  position:sticky;top:0;z-index:4}
+h1{margin:0;font-size:20px;letter-spacing:-.4px}
+h1 span{color:var(--accento)}
+.sub{color:var(--tenue);font-size:13px;margin-top:3px}
+.cat{margin:22px 18px 8px;font-size:12px;letter-spacing:1.4px;text-transform:uppercase;color:var(--tenue)}
+.piatto{display:flex;gap:12px;align-items:center;background:var(--carta);margin:0 14px 8px;
+  padding:13px 14px;border:1px solid var(--bordo);border-radius:12px}
+.piatto .info{flex:1;min-width:0}
+.piatto .nome{font-weight:600;font-size:15.5px}
+.piatto .tag{color:var(--tenue);font-size:12.5px;margin-top:2px}
+.piatto .prezzo{font-variant-numeric:tabular-nums;color:var(--tenue);font-size:14px}
+.add{width:36px;height:36px;border-radius:50%;border:1px solid var(--bordo);background:var(--bg);
+  font-size:20px;line-height:1;cursor:pointer;flex:none}
+.add:active{background:var(--accento);color:#fff}
+.vino{margin:18px 14px;padding:14px;border-radius:12px;background:#fff8f0;
+  border:1px solid #efd9c2;display:none}
+.vino.on{display:block}
+.vino .t{font-size:11.5px;letter-spacing:1.3px;text-transform:uppercase;color:var(--accento)}
+.vino .n{font-weight:600;margin-top:4px}
+.vino .m{color:var(--tenue);font-size:13.5px;margin-top:2px}
+.vino button{margin-top:10px;background:var(--accento);color:#fff;border:0;border-radius:9px;
+  padding:9px 14px;font-size:14px;font-weight:600}
+.barra{position:fixed;left:0;right:0;bottom:0;background:var(--carta);border-top:1px solid var(--bordo);
+  padding:12px 18px calc(12px + env(safe-area-inset-bottom));display:flex;
+  justify-content:space-between;align-items:center}
+.barra .c{color:var(--tenue);font-size:13px}
+.barra .tot{font-weight:700;font-size:18px;font-variant-numeric:tabular-nums}
+.vuoto{text-align:center;color:var(--tenue);padding:60px 24px}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:86px;background:var(--testo);
+  color:#fff;padding:9px 16px;border-radius:999px;font-size:14px;opacity:0;transition:opacity .2s}
+.toast.on{opacity:1}
+</style>
+</head>
+<body>
+<header>
+  <h1>leggi<span>menu</span></h1>
+  <div class="sub" id="sub">caricamento…</div>
+</header>
+
+<div id="vino" class="vino">
+  <div class="t">il nostro consiglio</div>
+  <div class="n" id="v-nome"></div>
+  <div class="m" id="v-motivo"></div>
+  <button id="v-add">Aggiungilo all'ordine</button>
+</div>
+
+<div id="menu"></div>
+
+<div class="barra">
+  <span class="c" id="riepilogo">nessun piatto ordinato</span>
+  <span class="tot" id="totale">0,00 €</span>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const sessione = location.pathname.split("/").pop();
+const $ = (s) => document.querySelector(s);
+let tavoloId = null;
+
+function toast(t){ const el=$("#toast"); el.textContent=t; el.classList.add("on");
+  setTimeout(()=>el.classList.remove("on"),1400); }
+
+async function carica(){
+  const r = await fetch(`/api/sessione/${sessione}`);
+  if(!r.ok){ document.body.innerHTML='<div class="vuoto">Questo tavolo non è aperto.<br>Chiedi al personale.</div>'; return; }
+  const d = await r.json();
+  const t = d.tavolo; tavoloId = t.id;
+  $("#sub").textContent = `${t.nome} · ${t.coperti} coperti`;
+
+  const cont = $("#menu");
+  cont.innerHTML = "";
+  const categorie = [...new Set(d.menu.map(p=>p.categoria))];
+  for(const c of categorie){
+    const h = document.createElement("div"); h.className="cat"; h.textContent=c+"i";
+    h.textContent = {antipasto:"Antipasti",primo:"Primi",secondo:"Secondi",pizza:"Pizze",dolce:"Dolci"}[c]||c;
+    cont.appendChild(h);
+    for(const p of d.menu.filter(x=>x.categoria===c)){
+      const el = document.createElement("div"); el.className="piatto";
+      el.innerHTML = `<div class="info"><div class="nome">${p.nome}</div>
+        <div class="tag">${p.tag.slice(0,3).join(" · ").replace(/_/g," ")}</div></div>
+        <div class="prezzo">${p.prezzo.toFixed(2)} €</div>`;
+      const b = document.createElement("button"); b.className="add"; b.textContent="+";
+      b.onclick = () => ordina(p.id, p.nome);
+      el.appendChild(b); cont.appendChild(el);
+    }
+  }
+  aggiorna(t);
+}
+
+function aggiorna(t){
+  const n = t.ordine.reduce((s,r)=>s+r.quantita,0);
+  $("#riepilogo").textContent = n ? `${n} piatt${n===1?"o":"i"} ordinati` : "nessun piatto ordinato";
+  $("#totale").textContent = t.totale.toFixed(2).replace(".",",")+" €";
+  const v = t.abbinamento, box = $("#vino");
+  if(v && !t.abbinamento_accettato){
+    box.classList.add("on");
+    $("#v-nome").textContent = `${v.nome} ${v.annata||""}`;
+    const prezzo = v.formato_consigliato==="bottiglia" ? v.bottiglia : v.calice;
+    $("#v-motivo").textContent = `${v.motivo} · ${v.formato_consigliato} ${prezzo.toFixed(2)} €`;
+    $("#v-add").onclick = async () => {
+      await fetch(`/api/tavoli/${tavoloId}/vino?accetta=true`,{method:"POST"});
+      box.classList.remove("on"); toast("Ottima scelta, arriva subito");
+    };
+  } else box.classList.remove("on");
+}
+
+async function ordina(piatto_id, nome){
+  const r = await fetch(`/api/tavoli/${tavoloId}/ordina`,{
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({piatto_id, quantita:1, origine:"telefono"})});
+  if(r.ok){ toast(`${nome} aggiunto`); aggiorna(await r.json()); }
+}
+
+carica();
+setInterval(async ()=>{
+  if(!tavoloId) return;
+  const r = await fetch(`/api/sessione/${sessione}`);
+  if(r.ok) aggiorna((await r.json()).tavolo);
+}, 4000);
+</script>
+</body>
+</html>

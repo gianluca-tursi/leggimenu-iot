@@ -1,0 +1,15 @@
+# Ambiente Python: 200 MB che si ricreano con ./scripts/installa.sh
+.venv/
+__pycache__/
+*.pyc
+
+# Credenziali WiFi: restano sulla macchina, non nel repository
+credenziali.h
+
+# Roba di compilazione Arduino
+build/
+*.bin
+*.elf
+
+# Sistema
+.DS_Store

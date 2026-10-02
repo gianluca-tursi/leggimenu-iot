@@ -1,0 +1,345 @@
+#pragma once
+// Generata da tools/radar_live.html: non modificarla a mano.
+static const char PAGINA_HTML[] PROGMEM = R"PAGINA(
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>radar · nodo leggimenu</title>
+<style>
+:root{--bg:#0d1014;--pan:#151a21;--bordo:#242c36;--txt:#e6ecf3;--dim:#7e8a99;
+      --verde:#3ddc84;--ambra:#e0a23c;--rosso:#e2683c;--blu:#5b9ddb}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);
+  font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif}
+header{display:flex;align-items:center;justify-content:space-between;gap:16px;
+  padding:12px 20px;border-bottom:1px solid var(--bordo);background:var(--pan)}
+h1{margin:0;font-size:16px;font-weight:600;letter-spacing:-.2px}
+h1 span{color:var(--dim);font-weight:400}
+.stato{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--dim)}
+.led{width:9px;height:9px;border-radius:50%;background:var(--rosso)}
+.led.on{background:var(--verde);box-shadow:0 0 0 3px rgba(61,220,132,.16)}
+main{display:grid;grid-template-columns:1fr 290px;gap:18px;padding:18px;align-items:start}
+@media(max-width:900px){main{grid-template-columns:1fr}}
+.scena{background:var(--pan);border:1px solid var(--bordo);border-radius:14px;padding:12px}
+canvas{width:100%;height:auto;display:block}
+aside{display:flex;flex-direction:column;gap:14px}
+.card{background:var(--pan);border:1px solid var(--bordo);border-radius:14px;padding:14px}
+.card h2{margin:0 0 10px;font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:var(--dim);font-weight:600}
+.big{font-size:30px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1}
+.big small{font-size:14px;font-weight:400;color:var(--dim)}
+.riga{display:flex;justify-content:space-between;padding:5px 0;font-size:13px;border-bottom:1px solid var(--bordo)}
+.riga:last-child{border:0}
+.riga span{color:var(--dim)}
+.riga b{font-variant-numeric:tabular-nums;font-weight:600}
+.t{display:flex;align-items:center;gap:9px;padding:7px 0;font-size:13px}
+.pill{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;
+  font-size:11px;font-weight:700;color:#0d1014;flex:none}
+.p1{background:var(--verde)} .p2{background:var(--ambra)} .p3{background:var(--blu)}
+.vuoto{color:var(--dim);font-size:13px;padding:6px 0}
+.ctrl{display:flex;gap:8px;align-items:center;font-size:12.5px;color:var(--dim)}
+.ctrl input{flex:1;accent-color:var(--ambra)}
+button{background:#222a35;color:var(--txt);border:1px solid var(--bordo);
+  border-radius:8px;padding:6px 11px;font-size:12.5px;cursor:pointer}
+button:hover{background:#2c3644}
+</style>
+</head>
+<body>
+<header>
+  <h1>radar live <span>· LD2450 · leggimenu</span></h1>
+  <div class="stato"><span id="led" class="led"></span><span id="stato">in attesa del nodo…</span></div>
+</header>
+
+<div id="avviso" style="display:none;margin:16px 18px 0;padding:12px 14px;
+  border-radius:10px;background:rgba(226,104,60,.14);border:1px solid var(--rosso);
+  color:var(--rosso);font-size:14px"></div>
+
+<main>
+  <div class="scena"><canvas id="c" width="1000" height="620"></canvas></div>
+
+  <aside>
+    <div class="card">
+      <h2>Tavolo</h2>
+      <div class="big"><span id="fase">—</span></div>
+      <div class="riga" style="margin-top:10px"><span>coperti confermati</span><b id="conf">–</b></div>
+      <div class="riga"><span>candidati</span><b id="cand">–</b></div>
+      <div class="riga"><span>conferma fra</span><b id="manca">–</b></div>
+      <button id="reset2" class="azzera">Nuova prova (reset)</button>
+    </div>
+
+    <div class="card">
+      <h2>Rilevati adesso</h2>
+      <div class="big"><span id="n">0</span><small> / 3 per sensore</small></div>
+      <div id="lista" style="margin-top:10px"></div>
+    </div>
+
+    <div class="card">
+      <h2>Sessione</h2>
+      <div class="riga"><span>frequenza</span><b id="hz">– Hz</b></div>
+      <div class="riga"><span>distanza max</span><b id="dmax">–</b></div>
+      <div class="riga"><span>angolo</span><b id="arange">–</b></div>
+      <div class="riga"><span>buchi</span><b id="buchi">0</b></div>
+      <div class="riga"><span>buco più lungo</span><b id="buco">0,0 s</b></div>
+    </div>
+
+    <div class="card">
+      <h2>Rete</h2>
+      <div class="riga"><span>segnale Wi-Fi</span><b id="rssi">–</b></div>
+      <div class="riga"><span>qualità</span><b id="qual">–</b></div>
+      <div class="riga"><span>indirizzo</span><b id="ip">–</b></div>
+    </div>
+
+    <div class="card">
+      <h2>Vista</h2>
+      <label class="ctrl">portata
+        <input id="range" type="range" min="100" max="600" step="50" value="250">
+        <b id="rval">250 cm</b>
+      </label>
+      <label class="ctrl" style="margin-top:8px">scia
+        <input id="scia" type="range" min="0" max="120" step="10" value="60">
+        <b id="sval">60</b>
+      </label>
+      <button id="reset" style="margin-top:10px;width:100%">Azzera statistiche</button>
+    </div>
+  </aside>
+</main>
+
+<script>
+const cv=document.getElementById('c'), ctx=cv.getContext('2d');
+const COLORI=['#3ddc84','#e0a23c','#5b9ddb'];
+let portata=250, maxScia=60;
+let scie=[[],[],[]], attuali=[], nAttuali=0, radarMuto=false;
+let ultimoFrame=0, fermo=false;
+let stat={frame:0, t0:0, dmax:0, amin:null, amax:null, buchi:0, buco:0, vuotoDa:null};
+
+const $=id=>document.getElementById(id);
+$('range').oninput=e=>{portata=+e.target.value; $('rval').textContent=portata+' cm';};
+$('scia').oninput=e=>{maxScia=+e.target.value; $('sval').textContent=maxScia;};
+function azzeraNodo(){
+  // sulla pagina servita dal nodo chiamo il suo /reset; su quella via cavo
+  // il server inoltra una 'R' sulla seriale. Provo entrambe.
+  fetch('/reset').catch(()=>{});
+  fetch('/api/reset',{method:'POST'}).catch(()=>{});
+}
+document.getElementById('reset2').onclick=()=>{ azzeraNodo(); document.getElementById('reset').click(); };
+$('reset').onclick=()=>{stat={frame:0,t0:performance.now(),dmax:0,amin:null,amax:null,buchi:0,buco:0,vuotoDa:null};scie=[[],[],[]];aggiornaPannello();};
+
+/* ---------- disegno ---------- */
+function proietta(x,y,W,H){
+  const ox=W/2, oy=H-46, scala=(H-90)/portata;
+  return [ox + x*scala, oy - y*scala];
+}
+function disegna(){
+  const W=cv.width, H=cv.height;
+  ctx.clearRect(0,0,W,H);
+  const ox=W/2, oy=H-46, scala=(H-90)/portata;
+
+  // cono ±60°
+  ctx.save();
+  ctx.beginPath(); ctx.moveTo(ox,oy);
+  ctx.arc(ox,oy,portata*scala,-Math.PI/2-Math.PI/3,-Math.PI/2+Math.PI/3);
+  ctx.closePath();
+  ctx.fillStyle='rgba(91,157,219,.05)'; ctx.fill();
+  ctx.strokeStyle='#2a3340'; ctx.lineWidth=1.5; ctx.stroke();
+  ctx.restore();
+
+  // anelli di distanza
+  ctx.strokeStyle='#1e2630'; ctx.fillStyle='#55606e'; ctx.font='11px system-ui';
+  const passo = portata<=200?50:100;
+  for(let r=passo;r<=portata;r+=passo){
+    ctx.beginPath();
+    ctx.arc(ox,oy,r*scala,-Math.PI/2-Math.PI/3,-Math.PI/2+Math.PI/3);
+    ctx.stroke();
+    ctx.fillText(r+' cm', ox+6, oy-r*scala-4);
+  }
+  // raggi ogni 30°
+  for(const a of [-60,-30,0,30,60]){
+    const rad=(a-90)*Math.PI/180;
+    ctx.beginPath(); ctx.moveTo(ox,oy);
+    ctx.lineTo(ox+Math.cos(rad)*portata*scala, oy+Math.sin(rad)*portata*scala);
+    ctx.strokeStyle = a===0?'#28323e':'#1c242e'; ctx.stroke();
+    if(a!==0){
+      const lx=ox+Math.cos(rad)*(portata*scala+20), ly=oy+Math.sin(rad)*(portata*scala+20);
+      ctx.fillStyle='#55606e'; ctx.textAlign='center';
+      ctx.fillText(a+'°', lx, ly); ctx.textAlign='left';
+    }
+  }
+
+  // sensore
+  ctx.fillStyle='#e6ecf3';
+  ctx.fillRect(ox-16,oy-4,32,8);
+  ctx.fillStyle='#55606e'; ctx.textAlign='center';
+  ctx.fillText('sensore', ox, oy+22); ctx.textAlign='left';
+
+  // scie
+  scie.forEach((s,i)=>{
+    s.forEach((p,k)=>{
+      const [px,py]=proietta(p.x,p.y,W,H);
+      ctx.globalAlpha=(k+1)/s.length*0.5;
+      ctx.fillStyle=COLORI[i];
+      ctx.beginPath(); ctx.arc(px,py,3,0,7); ctx.fill();
+    });
+  });
+  ctx.globalAlpha=1;
+
+  // bersagli attuali: sbiaditi se i dati sono fermi
+  ctx.globalAlpha = fermo ? 0.25 : 1;
+  attuali.forEach((t,i)=>{
+    const c=COLORI[(t.id-1)%3];
+    const [px,py]=proietta(t.x,t.y,W,H);
+    ctx.beginPath(); ctx.arc(px,py,26,0,7);
+    ctx.fillStyle=c+'22'; ctx.fill();
+    ctx.beginPath(); ctx.arc(px,py,10,0,7);
+    ctx.fillStyle=c; ctx.fill();
+    ctx.fillStyle='#0d1014'; ctx.font='bold 12px system-ui'; ctx.textAlign='center';
+    ctx.fillText(t.id, px, py+4);
+    ctx.fillStyle=c; ctx.font='12px system-ui';
+    ctx.fillText(Math.round(t.dist)+' cm · '+t.ang+'°', px, py-34);
+    ctx.textAlign='left';
+  });
+
+  ctx.globalAlpha=1;
+  if(fermo){
+    ctx.fillStyle='#e2683c'; ctx.font='bold 16px system-ui'; ctx.textAlign='center';
+    ctx.fillText('DATI FERMI - connessione caduta', W/2, 54); ctx.textAlign='left';
+  } else if(!attuali.length){
+    ctx.fillStyle='#55606e'; ctx.font='15px system-ui'; ctx.textAlign='center';
+    ctx.fillText('nessuno nel cono', W/2, 54); ctx.textAlign='left';
+  }
+  requestAnimationFrame(disegna);
+}
+requestAnimationFrame(disegna);
+
+/* ---------- pannello ---------- */
+function aggiornaPannello(){
+  $('n').textContent=nAttuali;
+  const el=$('lista');
+  if(!attuali.length){ el.innerHTML='<div class="vuoto">nessuno davanti al sensore</div>'; }
+  else el.innerHTML=attuali.map(t=>
+    `<div class="t"><span class="pill p${t.id}">${t.id}</span>
+     <b>${Math.round(t.dist)} cm</b><span>${t.ang}°</span>
+     <span style="margin-left:auto">${t.v} cm/s</span></div>`).join('');
+
+  const sec=(performance.now()-stat.t0)/1000;
+  $('hz').textContent = sec>1 ? (stat.frame/sec).toFixed(1)+' Hz' : '– Hz';
+  $('dmax').textContent = stat.dmax ? Math.round(stat.dmax)+' cm' : '–';
+  $('arange').textContent = stat.amin===null ? '–'
+    : `${stat.amin.toFixed(0)}° … ${stat.amax.toFixed(0)}°`;
+  $('buchi').textContent = stat.buchi;
+  $('buco').textContent = stat.buco.toFixed(1).replace('.',',')+' s';
+}
+aggiornaPannello();
+
+/* ---------- websocket ---------- */
+function connetti(){
+  const ws=new WebSocket(`ws://${location.hostname}:81/`);
+  ws.onopen=()=>{
+    if(!stat.t0) stat.t0=performance.now();
+    $('led').classList.add('on');
+    $('stato').textContent='collegato al nodo';
+  };
+  ws.onclose=()=>{ $('led').classList.remove('on'); $('stato').textContent='server chiuso'; setTimeout(connetti,1500); };
+  ws.onmessage=ev=>{
+    const m=JSON.parse(ev.data);
+    if(m.tipo==='stato'){
+      $('led').classList.toggle('on', m.collegato);
+      $('stato').textContent = m.collegato ? ('nodo su '+(m.porta||'seriale')) : 'nodo non collegato';
+      return;
+    }
+    if(m.tipo==='diagnosi'){
+      // Il nodo parla ma dal radar arrivano 0 byte: e' il cablaggio.
+      // L'avviso resta FISSO in cima: prima lo scrivevo nel riquadro dei
+      // bersagli, che ogni frame riscriveva, e lampeggiava illeggibile.
+      // Il contatore cumulativo NON torna a zero quando il cavo si stacca:
+      // resta fermo sul totale. Quindi mi fido del flag calcolato dal nodo
+      // sul tempo trascorso dall'ultimo frame, non del valore assoluto.
+      radarMuto = (m.radar===false) || (m.radar===undefined && m.byte===0);
+      if(m.rssi!==undefined && m.rssi!==0){
+        $('rssi').textContent = m.rssi + ' dBm';
+        // sotto i -75 dBm le disconnessioni diventano frequenti
+        const q = m.rssi>=-50 ? ['ottimo','var(--verde)']
+                : m.rssi>=-60 ? ['buono','var(--verde)']
+                : m.rssi>=-70 ? ['accettabile','var(--ambra)']
+                : m.rssi>=-80 ? ['debole','var(--ambra)']
+                :               ['al limite','var(--rosso)'];
+        $('qual').textContent = q[0];
+        $('qual').style.color = q[1];
+        $('rssi').style.color = q[1];
+      }
+      if(m.ip) $('ip').textContent = m.ip;
+      const a=$('avviso');
+      if(radarMuto){
+        a.style.display='block';
+        a.textContent='RADAR ASSENTE — il nodo funziona ma il sensore non risponde da '+
+                      'qualche secondo. Controlla i tre fili: 3V3, GND e IO40 '+
+                      'sul connettore GPIO_D.';
+        $('led').classList.remove('on');
+        $('stato').textContent='radar muto';
+      } else {
+        a.style.display='none';
+      }
+      return;
+    }
+    if(m.tipo!=='frame') return;
+    ultimoFrame=performance.now();
+    if(m.fase){
+      const et={vuoto:'tavolo libero',arrivo:'si accomodano…',stabile:'confermato'}[m.fase]||m.fase;
+      $('fase').textContent=et;
+      $('fase').style.color = m.fase==='stabile' ? 'var(--verde)'
+                            : m.fase==='arrivo'  ? 'var(--ambra)' : 'var(--dim)';
+      $('conf').textContent = m.confermati>0 ? m.confermati : '–';
+      $('cand').textContent = m.candidati>0 ? m.candidati : '–';
+      $('manca').textContent = m.fase==='arrivo' ? m.manca.toFixed(1)+' s' : '–';
+    }
+    if(fermo){ fermo=false; $('avviso').style.display='none'; }
+    if(!radarMuto){
+      $('led').classList.add('on');
+      $('stato').textContent='nodo attivo';
+    }
+    attuali=m.bersagli; nAttuali=m.n;
+    stat.frame++;
+    if(!stat.t0) stat.t0=performance.now();
+
+    if(m.n===0){ if(stat.vuotoDa===null) stat.vuotoDa=performance.now(); }
+    else if(stat.vuotoDa!==null){
+      const d=(performance.now()-stat.vuotoDa)/1000;
+      stat.buchi++; if(d>stat.buco) stat.buco=d; stat.vuotoDa=null;
+    }
+    for(const t of m.bersagli){
+      if(t.dist>stat.dmax) stat.dmax=t.dist;
+      if(stat.amin===null||t.ang<stat.amin) stat.amin=t.ang;
+      if(stat.amax===null||t.ang>stat.amax) stat.amax=t.ang;
+      const i=(t.id-1)%3;
+      scie[i].push({x:t.x,y:t.y});
+      while(scie[i].length>maxScia) scie[i].shift();
+    }
+    if(m.n===0) scie=[[],[],[]];
+    aggiornaPannello();
+  };
+}
+connetti();
+
+// Se smettono di arrivare frame, la pagina continuerebbe a disegnare per sempre
+// l'ultima posizione: sembra un radar che "si blocca" mentre in realta' e' la
+// connessione caduta. Qui lo dico esplicitamente invece di mentire.
+setInterval(()=>{
+  if(!ultimoFrame) return;
+  const eta=(performance.now()-ultimoFrame)/1000;
+  if(eta>2 && !fermo && !radarMuto){
+    fermo=true;
+    const a=$('avviso');
+    a.style.display='block';
+    a.textContent='Dati fermi da '+eta.toFixed(0)+'s: la connessione col nodo e\' caduta. '+
+                  'Quello che vedi e\' l\'ultima posizione ricevuta, non la realta\'.';
+    $('led').classList.remove('on');
+    $('stato').textContent='dati fermi';
+  } else if(fermo){
+    $('avviso').textContent='Dati fermi da '+eta.toFixed(0)+'s: connessione col nodo caduta.';
+  }
+}, 1000);
+</script>
+</body>
+</html>
+
+)PAGINA";
