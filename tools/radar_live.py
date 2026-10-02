@@ -24,7 +24,8 @@ from pathlib import Path
 import serial
 import uvicorn
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
+                               RedirectResponse)
 
 QUI = Path(__file__).parent
 RE_N = re.compile(r"bersagli:\s*(\d+)")
@@ -250,17 +251,37 @@ def da_fuori(request: Request) -> bool:
                 or ip.startswith(tuple(f"172.{n}." for n in range(16, 32))))
 
 
-SOLO_IN_CASA = "questa pagina si apre solo dalla rete del locale"
+TAVOLO_PREDEFINITO = "7"
+
+CHIUSO = """<!doctype html><html lang="it"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>leggimenu</title><style>
+body{margin:0;min-height:100vh;display:flex;align-items:center;
+justify-content:center;background:#faf8f5;color:#231f1c;text-align:center;
+font:16px/1.6 -apple-system,system-ui,sans-serif;padding:30px}
+h1{font-size:22px;margin:0 0 8px}p{color:#8a807a;margin:0;max-width:300px}
+</style></head><body><div><h1>leggimenu</h1>
+<p>Questa parte si apre solo dai dispositivi del locale.<br>
+Per il menu, inquadra il codice sul tavolo.</p></div></body></html>"""
 
 
 @app.middleware("http")
 async def chiudi_il_gestionale(request: Request, call_next):
     """Dal tunnel passa solo quello che serve al cliente: menu e ordini."""
     via = request.url.path
+    fuori = da_fuori(request)
+
+    # Chi inquadra un QR con il solo indirizzo, senza /m/<tavolo>, finirebbe
+    # sulla pagina chiusa e leggerebbe un errore incomprensibile. Lo porto al
+    # menu: e' quello che voleva, e il QR non deve essere perfetto per
+    # funzionare.
+    if fuori and via == "/":
+        return RedirectResponse(f"/m/{TAVOLO_PREDEFINITO}")
+
     pubblico = (via.startswith("/m/") or via == "/api/ordine"
                 or via.startswith("/static"))
-    if not pubblico and da_fuori(request):
-        return JSONResponse({"errore": SOLO_IN_CASA}, status_code=403)
+    if not pubblico and fuori:
+        return HTMLResponse(CHIUSO, status_code=403)
     return await call_next(request)
 clienti: set[WebSocket] = set()
 seriale_aperta: list = []          # la Serial viva, per poter mandare comandi
