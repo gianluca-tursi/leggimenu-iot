@@ -31,5 +31,10 @@ if ! curl -s -o /dev/null -m 3 "http://localhost:$PORTA/"; then
 fi
 
 echo "· apro il tunnel (Ctrl-C per chiuderlo)"
+echo "  tengo sveglio il Mac finche' resta aperto: se si addormenta il tunnel"
+echo "  cade e il QR sul tavolo smette di funzionare senza avvisare nessuno."
 echo
-exec ./bin/cloudflared tunnel --no-autoupdate --url "http://localhost:$PORTA"
+
+# caffeinate -i: niente sonno per inattivita' finche' cloudflared gira.
+# Non uso -s perche' vale solo a corrente attaccata, e in fiera non e' detto.
+exec caffeinate -i ./bin/cloudflared tunnel --no-autoupdate --url "http://localhost:$PORTA"
