@@ -305,6 +305,10 @@ async def lifespan(app: FastAPI):
                     apertura[1] = n
                 await diffondi(registra_evento(
                     "aperto" if primo else "coperti", coperti=n))
+                # Anche qui, non solo nel percorso del ponte: lo stato deve
+                # arrivare alla cassa subito, altrimenti la finestra dei
+                # coperti compare solo ricaricando la pagina.
+                await diffondi(stato_tavolo())
                 continue
             await diffondi(msg)
 
