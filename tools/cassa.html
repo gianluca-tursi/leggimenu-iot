@@ -57,6 +57,20 @@
   .riga-piatto{display:flex;justify-content:space-between;gap:12px;
     padding:3px 0;font-size:14px}
   .riga-piatto span{color:var(--tenue);font-variant-numeric:tabular-nums}
+
+  .etichetta{display:inline-block;padding:4px 11px;border-radius:99px;
+    font-size:12px;font-weight:600;letter-spacing:.01em;
+    background:var(--riga);color:var(--tenue)}
+  .etichetta.attesa{background:rgba(255,159,10,.16);color:var(--ambra)}
+  .etichetta.fatto {background:rgba(48,209,88,.16);color:var(--verde)}
+  .attesaGrande{font-size:34px;font-weight:600;letter-spacing:-.022em;
+    font-variant-numeric:tabular-nums;margin:14px 0 2px}
+  .attesaGrande.tardi{color:var(--ambra)}
+  .attesaGrande.molto{color:#d7263d}
+  @media (prefers-color-scheme: dark){ .attesaGrande.molto{color:#ff6b6b} }
+  .azioni{display:flex;gap:9px;margin-top:18px;flex-wrap:wrap}
+  .azioni .pulsante{width:auto;flex:1 1 auto;min-width:138px;margin-top:0}
+  .piatti{margin-top:12px;padding-top:12px;border-top:1px solid var(--riga)}
 </style>
 </head>
 <body>
@@ -88,12 +102,21 @@
     <button class="pulsante" id="libera">Il pasto è finito · libera il tavolo</button>
   </div>
 
+  <div class="carta" id="cartaOrdine" style="display:none">
+    <span class="etichetta" id="etichettaStato">ordine inviato</span>
+    <div class="attesaGrande" id="attesa">—</div>
+    <div class="sottotitolo" id="attesaNota"></div>
+    <div class="piatti" id="piattiOrdine"></div>
+    <div class="azioni" id="azioni"></div>
+  </div>
+
   <h2>Cos'è successo</h2>
   <div class="carta" id="storia"><div class="vuoto">ancora niente</div></div>
 
 </div>
 <script>
-const SEGNI = {aperto:'●', coperti:'●', scansione:'◆', ordine:'■', liberato:'○'};
+const SEGNI = {aperto:'●', coperti:'●', scansione:'◆', ordine:'■',
+               stato:'▸', liberato:'○'};
 let apertoDa = null, ordini = 0, totale = 0, coperti = 0, telefoni = 0;
 const storia = document.getElementById('storia');
 let righe = [];
@@ -153,12 +176,17 @@ function evento(m){
     titolo = 'Ordine inviato in cucina';
     dettaglio = m.righe.map(r=>`${r.qta}× ${r.nome}`).join(' · ')
               + (m.totale?` — ${euro(m.totale)} euro`:'');
+  } else if(m.evento==='stato'){
+    const f = FLUSSO[m.stato];
+    titolo = f ? f.nome.charAt(0).toUpperCase()+f.nome.slice(1) : m.stato;
+    const mm = Math.round((m.atteso||0)/60);
+    dettaglio = mm>=1 ? `dopo ${mm} ${mm===1?'minuto':'minuti'} di attesa` : 'subito';
   } else if(m.evento==='liberato'){
     const d = m.durata||0;
     titolo = 'Tavolo liberato';
     dettaglio = d ? `servizio durato ${Math.round(d/60)} minuti` : '';
     apertoDa = null; apertoOra = null; coperti = 0; telefoni = 0;
-    ordini = 0; totale = 0;
+    ordini = 0; totale = 0; ordineVivo = null; disegnaOrdine();
     righe = [];                       // servizio chiuso, la cassa riparte pulita
     righe.push({...m, titolo, dettaglio});
     disegna(); aggiorna(); return;
@@ -166,6 +194,63 @@ function evento(m){
   righe.push({...m, titolo, dettaglio});
   disegna(); aggiorna();
 }
+
+// Il percorso vero di una sala. Per ogni stato: come si chiama, cosa dice il
+// cronometro, e cosa puo' fare chi guarda adesso.
+const FLUSSO = {
+  inviato:      {nome:'ordine inviato',    nota:'in attesa che la cucina lo prenda in carico',
+                 azioni:[['preparazione','Presa in carico dalla cucina']]},
+  preparazione: {nome:'in preparazione',   nota:'in preparazione da',
+                 azioni:[['servito','Servito al tavolo']]},
+  servito:      {nome:'servito',           nota:'servito da',
+                 azioni:[['conto','Porta il conto']]},
+  conto:        {nome:'conto richiesto',   nota:'conto chiesto da',
+                 azioni:[]},
+};
+let ordineVivo = null;
+
+function minuti(da){ return Math.floor((Date.now()/1000 - da)/60); }
+
+function disegnaOrdine(){
+  const c = q('cartaOrdine');
+  if(!ordineVivo){ c.style.display='none'; return; }
+  c.style.display='';
+  const f = FLUSSO[ordineVivo.stato] || FLUSSO.inviato;
+  const m = minuti(ordineVivo.da);
+
+  const et = q('etichettaStato');
+  et.textContent = f.nome;
+  et.className = 'etichetta ' + (ordineVivo.stato==='inviato' ? 'attesa'
+                               : ordineVivo.stato==='servito' ? 'fatto' : '');
+
+  const a = q('attesa');
+  a.textContent = m < 1 ? 'adesso' : `da ${m} ${m===1?'minuto':'minuti'}`;
+  // Dopo un quarto d'ora un ordine fermo e' un cliente che si innervosisce.
+  a.className = 'attesaGrande' + (m>=20 ? ' molto' : m>=10 ? ' tardi' : '');
+  q('attesaNota').textContent =
+    ordineVivo.stato==='inviato' ? f.nota : '';
+
+  q('piattiOrdine').innerHTML = ordineVivo.righe.map(r=>
+    `<div class="riga-piatto"><div>${r.qta}× ${r.nome}</div>
+     <span>${euro(r.qta*(r.prezzo||0))}</span></div>`).join('')
+    + `<div class="riga-piatto" style="margin-top:6px"><b>totale</b>
+       <span><b>${euro(ordineVivo.totale||0)}</b></span></div>`;
+
+  q('azioni').innerHTML = f.azioni.map(([s,testo])=>
+    `<button class="pulsante" data-stato="${s}">${testo}</button>`).join('')
+    || '<div class="sottotitolo">niente altro da fare qui</div>';
+}
+setInterval(disegnaOrdine, 15000);
+
+q('azioni').onclick = async e=>{
+  const b = e.target.closest('button[data-stato]'); if(!b) return;
+  b.disabled = true;
+  try{
+    await fetch('/api/ordine/stato',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({stato:b.dataset.stato})});
+  }catch(err){ b.disabled = false; }
+};
 
 function collega(){
   const ws = new WebSocket(`ws://${location.host}/ws`);
@@ -177,6 +262,10 @@ function collega(){
   ws.onmessage = e=>{
     const m = JSON.parse(e.data);
     if(m.tipo === 'evento') evento(m);
+    else if(m.tipo === 'ordine_stato'){
+      ordineVivo = m.righe ? m : null;
+      disegnaOrdine();
+    }
   };
 }
 collega();

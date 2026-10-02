@@ -120,6 +120,13 @@ wifi_offerto: list[bool] = [False]
 # Tengo gli eventi qui cosi' una pagina aperta a meta' servizio vede comunque
 # tutto quello che e' gia' accaduto, invece di partire vuota.
 eventi: list[dict] = []
+
+# L'ordine in corso e a che punto e'. Il percorso e' quello vero di una sala:
+#   inviato -> in preparazione -> servito -> conto
+# La cassa mostra da quanti minuti e' fermo nello stato in cui sta, perche' e'
+# l'unica cosa che fa agire qualcuno.
+STATI = ["inviato", "preparazione", "servito", "conto"]
+ordine_corrente: dict = {}
 dispositivi: set[str] = set()      # chi ha inquadrato il QR, in questa sessione
 apertura: list[float] = []         # quando si e' aperto il tavolo
 
@@ -322,6 +329,7 @@ async def libera():
         wifi_offerto[0] = False        # tavolo nuovo, suggerimento di nuovo utile
         durata = int(time.time() - apertura[0]) if apertura else 0
         await manda_a_tutti(registra_evento("liberato", durata=durata))
+        ordine_corrente.clear()
         eventi.clear()                 # servizio chiuso: la cassa riparte pulita
         dispositivi.clear()
         apertura.clear()
@@ -412,10 +420,14 @@ async def ordine(dati: dict):
         return {"ok": False, "motivo": "ordine vuoto"}
 
     totale = sum(int(r.get("qta", 0)) * float(r.get("prezzo", 0)) for r in righe)
+    ordine_corrente.clear()
+    ordine_corrente.update({"righe": righe, "totale": totale, "stato": "inviato",
+                            "da": time.time(), "tavolo": tavolo})
     await manda_a_tutti({"tipo": "ordine", "tavolo": tavolo, "righe": righe,
                          "quando": time.strftime("%H:%M:%S")})
     await manda_a_tutti(registra_evento("ordine", tavolo=tavolo, righe=righe,
                                         totale=totale))
+    await manda_a_tutti({"tipo": "ordine_stato", **ordine_corrente})
 
     if seriale_aperta:
         try:
@@ -431,6 +443,22 @@ async def ordine(dati: dict):
             seriale_aperta[0].write(b"X\n")          # mostra la schermata
         except Exception as e:
             return {"ok": True, "pannello": f"non raggiunto: {e}"}
+    return {"ok": True}
+
+
+@app.post("/api/ordine/stato")
+async def ordine_stato(dati: dict):
+    """Avanza l'ordine: presa in carico, servito, conto."""
+    nuovo = (dati.get("stato") or "").strip()
+    if nuovo not in STATI:
+        return {"ok": False, "motivo": "stato sconosciuto"}
+    if not ordine_corrente:
+        return {"ok": False, "motivo": "nessun ordine in corso"}
+    atteso = int(time.time() - ordine_corrente.get("da", time.time()))
+    ordine_corrente["stato"] = nuovo
+    ordine_corrente["da"] = time.time()      # il cronometro riparte da qui
+    await manda_a_tutti(registra_evento("stato", stato=nuovo, atteso=atteso))
+    await manda_a_tutti({"tipo": "ordine_stato", **ordine_corrente})
     return {"ok": True}
 
 
@@ -490,6 +518,8 @@ async def ws(sock: WebSocket) -> None:
         await sock.send_json({"tipo": "pausa", "secondi": ultima_pausa[0]})
     for ev in eventi:                    # ...e tutto quello che e' gia' successo
         await sock.send_json(ev)
+    if ordine_corrente:
+        await sock.send_json({"tipo": "ordine_stato", **ordine_corrente})
     try:
         while True:
             await sock.receive_text()
