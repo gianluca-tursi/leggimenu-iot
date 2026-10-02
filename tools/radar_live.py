@@ -744,7 +744,8 @@ def main() -> None:
     import socket
     import sys
 
-    porta_http = 8080
+    # Sul server la 8080 puo' essere di qualcun altro: la si sceglie con PORTA.
+    porta_http = int(os.environ.get("PORTA", "8080"))
     # Se 8080 e' gia' occupata (spesso una copia di questo stesso script rimasta
     # aperta), lo dico chiaro e passo alla prima porta libera invece di morire.
     def libera(n: int) -> bool:
