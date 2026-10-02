@@ -795,10 +795,18 @@ def main() -> None:
     ip = _ip_locale()
     print(f"dashboard:     http://localhost:{porta_http}")
     print(f"dal telefono:  http://{ip}:{porta_http}")
-    # Ascolto su tutte le interfacce, non solo su localhost: il QR sul pannello
-    # lo inquadra un telefono, che deve poter arrivare qui dalla rete di casa.
-    # Sulla rete locale la dashboard diventa quindi visibile a chi ci sta sopra.
-    uvicorn.run(app, host="0.0.0.0", port=porta_http, log_level="warning")
+    # Sul Mac ascolto su tutte le interfacce, perche' il telefono deve poter
+    # arrivare qui dalla rete di casa.
+    #
+    # Su un server pubblico NO: dietro nginx va ascoltato solo 127.0.0.1.
+    # Altrimenti si arriva alla porta anche in diretta, saltando il proxy - e
+    # senza l'intestazione che il proxy aggiunge il server crederebbe che il
+    # visitatore sia in casa, aprendogli la cassa e i comandi.
+    #   ASCOLTA=127.0.0.1
+    ascolta = os.environ.get("ASCOLTA", "0.0.0.0")
+    if ascolta != "127.0.0.1":
+        print("           (in ascolto su tutta la rete; dietro un proxy usa ASCOLTA=127.0.0.1)")
+    uvicorn.run(app, host=ascolta, port=porta_http, log_level="warning")
 
 
 if __name__ == "__main__":

@@ -56,6 +56,8 @@ After=network.target
 
 [Service]
 WorkingDirectory=/opt/leggimenu
+Environment=PORTA=8099
+Environment=ASCOLTA=127.0.0.1
 Environment=LEGGIMENU_SEGRETO=IL_SEGRETO_DI_SOPRA
 ExecStart=/opt/leggimenu/.venv/bin/python tools/radar_live.py
 Restart=always
@@ -92,6 +94,10 @@ location / {
 
 Quell'ultima riga non è un dettaglio: è così che il server distingue chi arriva
 da internet da chi è in casa. Senza, la cassa resterebbe aperta al mondo.
+
+`ASCOLTA=127.0.0.1` non e' un dettaglio: senza, si arriva alla porta anche in
+diretta saltando il proxy, e senza l'intestazione che il proxy aggiunge il
+server crede che il visitatore sia in casa e gli apre la cassa.
 
 ## Sul Mac, ogni volta
 
