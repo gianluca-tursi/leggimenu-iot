@@ -496,7 +496,8 @@ async def chiudi_il_gestionale(request: Request, call_next):
     """Al cliente il menu e gli ordini; il resto a chi ha la password."""
     via = request.url.path
 
-    pubblico = (via.startswith("/m/") or via == "/api/ordine"
+    pubblico = (via.startswith("/m/") or via.startswith("/menu/")
+                or via == "/api/ordine"
                 or via.startswith("/img/") or via.startswith("/static")
                 or via in ("/entra", "/api/entra"))
     if pubblico or puo_entrare(request):
@@ -511,7 +512,7 @@ async def chiudi_il_gestionale(request: Request, call_next):
     # manderebbe al menu anche chi e' entrato, e la dashboard del radar - che
     # vive proprio su "/" - diventerebbe irraggiungibile.
     if via == "/":
-        return RedirectResponse(f"/m/{TAVOLO_PREDEFINITO}")
+        return RedirectResponse(f"/menu/{TAVOLO_PREDEFINITO}")
 
     # A una pagina mando la richiesta della password; a una chiamata di
     # servizio un errore, perche' una pagina di login dentro una risposta
@@ -774,6 +775,7 @@ async def rete():
             "nome": f"{nome}.local" if nome else ""}
 
 
+@app.get("/menu/{tavolo}")
 @app.get("/m/{tavolo}")
 async def menu(tavolo: str, request: Request):
     """La pagina che si apre inquadrando il QR sul pannello.
