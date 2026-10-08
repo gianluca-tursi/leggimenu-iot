@@ -496,18 +496,22 @@ async def chiudi_il_gestionale(request: Request, call_next):
     """Al cliente il menu e gli ordini; il resto a chi ha la password."""
     via = request.url.path
 
-    # Chi inquadra un QR con il solo indirizzo, senza /m/<tavolo>, finirebbe
-    # sulla pagina chiusa e leggerebbe un errore incomprensibile. Lo porto al
-    # menu: e' quello che voleva, e il QR non deve essere perfetto per
-    # funzionare.
-    if da_fuori(request) and via == "/":
-        return RedirectResponse(f"/m/{TAVOLO_PREDEFINITO}")
-
     pubblico = (via.startswith("/m/") or via == "/api/ordine"
                 or via.startswith("/img/") or via.startswith("/static")
                 or via in ("/entra", "/api/entra"))
     if pubblico or puo_entrare(request):
         return await call_next(request)
+
+    # Chi inquadra un QR con il solo indirizzo, senza /m/<tavolo>, finirebbe
+    # davanti alla richiesta della password senza capire perche'. Lo porto al
+    # menu: e' quello che voleva, e il QR non deve essere perfetto per
+    # funzionare.
+    #
+    # Questo controllo sta DOPO quello della password, non prima: altrimenti
+    # manderebbe al menu anche chi e' entrato, e la dashboard del radar - che
+    # vive proprio su "/" - diventerebbe irraggiungibile.
+    if via == "/":
+        return RedirectResponse(f"/m/{TAVOLO_PREDEFINITO}")
 
     # A una pagina mando la richiesta della password; a una chiamata di
     # servizio un errore, perche' una pagina di login dentro una risposta
