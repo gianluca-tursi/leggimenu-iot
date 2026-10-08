@@ -139,6 +139,21 @@ def piatti_ordinabili() -> list[dict]:
     return voci
 
 
+def accorcia(testo: str, massimo: int) -> str:
+    """Taglia una riga per il pannello senza spezzare le parole.
+
+    Tagliare al carattere faceva finire "Tagliatelle al ragu di cinghiale" in
+    "...di c": il pezzo mozzato non si capisce ed e' peggio di una riga corta.
+    """
+    if len(testo) <= massimo:
+        return testo
+    corto = testo[:massimo].rstrip()
+    spazio = corto.rfind(" ")
+    if spazio > massimo // 2:           # se resta abbastanza, taglio a parola
+        corto = corto[:spazio]
+    return corto + "."
+
+
 def abbina_vino(righe: list[dict], coperti: int):
     """Il vino da proporre, o None se non ha senso proporlo."""
     if not suggerisci or not RigaOrdine:
@@ -701,9 +716,7 @@ async def ordine(dati: dict):
             time.sleep(0.05)
             for r in righe[:8]:
                 q = int(r.get("qta", 1))
-                # Il pannello ha 27 caratteri per riga: tagliare qui e' meglio
-                # che far sbordare il testo fuori dallo schermo.
-                testo = f"{q}x {r.get('nome','')}"[:27]
+                testo = accorcia(f"{q}x {r.get('nome','')}", 24)
                 seriale_aperta[0].write(f"V:{testo}\n".encode())
                 time.sleep(0.05)
             seriale_aperta[0].write(b"X\n")          # mostra la schermata

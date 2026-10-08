@@ -249,8 +249,19 @@ static void schermoOrdine() {
   int y = 140;
   epd.setFont(&FreeMono9pt7b);
   for (int i = 0; i < nOrdine && y < 320; i++) {
+    // Accorcio finche' ci sta davvero, misurando: contare i caratteri a mano
+    // e' quello che ha fatto finire "cinghiale" tagliato a meta' sulla riga
+    // successiva.
+    char riga[32];
+    snprintf(riga, sizeof(riga), "%s", ordine[i]);
+    int16_t bx, by; uint16_t bw, bh;
+    while (strlen(riga) > 3) {
+      epd.getTextBounds(riga, 0, y, &bx, &by, &bw, &bh);
+      if (24 + (int)bw <= epd.width() - 12) break;
+      riga[strlen(riga) - 1] = 0;
+    }
     epd.setCursor(24, y);
-    epd.print(ordine[i]);
+    epd.print(riga);
     y += 26;
   }
   if (!nOrdine) centrata("(nessuna portata)", &FreeMono9pt7b, 160);
@@ -301,6 +312,9 @@ static void schermoVino() {
 static void disegna(int coperti) {
   epd.setRotation(1);                       // 400x300 -> 300x400, verticale
   epd.setTextColor(GxEPD_BLACK);
+  // Niente a capo automatico: una riga troppo lunga finirebbe sopra quella
+  // dopo e si leggerebbero due piatti sovrapposti. Meglio troncarla.
+  epd.setTextWrap(false);
   epd.setFullWindow();
   epd.firstPage();
   do {
