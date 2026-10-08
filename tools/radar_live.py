@@ -13,6 +13,8 @@ import os
 import pathlib
 import uuid
 import sys
+import hmac
+import hashlib
 import asyncio
 import glob
 import json
@@ -413,6 +415,70 @@ def da_fuori(request: Request) -> bool:
 
 TAVOLO_PREDEFINITO = "7"
 
+# --- chi puo' entrare nel gestionale --------------------------------------
+# Finche' il server girava sul Mac bastava guardare da che rete arrivava la
+# richiesta. Ora che sta su internet quella distinzione non esiste piu': da
+# fuori arrivano tutti, anche il cameriere. Quindi serve una parola.
+#
+# Se non e' impostata nessuna password si torna al controllo di rete, cosi' in
+# locale si continua a lavorare senza doverla digitare ogni volta.
+FILE_PASSWORD = DATI / "password.txt"
+
+
+def password_cassa() -> str:
+    dalla_env = os.environ.get("LEGGIMENU_PASSWORD", "").strip()
+    if dalla_env:
+        return dalla_env
+    try:
+        return FILE_PASSWORD.read_text().strip()
+    except Exception:
+        return ""
+
+
+def gettone(pw: str) -> str:
+    """Un biscotto che non si puo' inventare senza conoscere la password."""
+    return hmac.new(pw.encode(), b"cassa-leggimenu", hashlib.sha256).hexdigest()
+
+
+def puo_entrare(request: Request) -> bool:
+    pw = password_cassa()
+    if not pw:
+        return not da_fuori(request)          # come prima: vale la rete
+    return hmac.compare_digest(request.cookies.get("lm_cassa", ""), gettone(pw))
+
+
+PAGINA_ENTRA = """<!doctype html><html lang="it"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>leggimenu</title><style>
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+background:#f5f5f7;color:#1d1d1f;font:16px/1.5 -apple-system,system-ui,sans-serif;padding:24px}
+form{background:#fff;padding:30px 26px;border-radius:20px;max-width:330px;width:100%;
+box-shadow:0 1px 2px rgba(0,0,0,.04),0 8px 30px rgba(0,0,0,.06)}
+h1{margin:0 0 4px;font-size:22px;letter-spacing:-.02em}
+p{margin:0 0 20px;color:#86868b;font-size:14px}
+input{width:100%;box-sizing:border-box;padding:13px;border:1px solid #e8e8ed;
+border-radius:12px;font:16px inherit;margin-bottom:12px}
+button{width:100%;padding:14px;border:0;border-radius:12px;background:#0071e3;
+color:#fff;font:16px inherit;font-weight:500}
+.no{color:#d7263d;font-size:14px;margin-top:12px;min-height:20px}
+@media (prefers-color-scheme:dark){body{background:#000;color:#f5f5f7}
+form{background:#1c1c1e}input{background:#000;border-color:#2c2c2e;color:#f5f5f7}}
+</style></head><body>
+<form id="f"><h1>leggimenu</h1><p>gestionale cassa</p>
+<input id="pw" type="password" placeholder="password" autofocus autocomplete="current-password">
+<button>Entra</button><div class="no" id="no"></div></form>
+<script>
+document.getElementById('f').onsubmit = async e => {
+  e.preventDefault();
+  const r = await fetch('/api/entra', {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({password: document.getElementById('pw').value})});
+  const d = await r.json();
+  if (d.ok) location.href = '/cassa';
+  else document.getElementById('no').textContent = 'password sbagliata';
+};
+</script></body></html>"""
+
 CHIUSO = """<!doctype html><html lang="it"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>leggimenu</title><style>
@@ -427,22 +493,47 @@ Per il menu, inquadra il codice sul tavolo.</p></div></body></html>"""
 
 @app.middleware("http")
 async def chiudi_il_gestionale(request: Request, call_next):
-    """Dal tunnel passa solo quello che serve al cliente: menu e ordini."""
+    """Al cliente il menu e gli ordini; il resto a chi ha la password."""
     via = request.url.path
-    fuori = da_fuori(request)
 
     # Chi inquadra un QR con il solo indirizzo, senza /m/<tavolo>, finirebbe
     # sulla pagina chiusa e leggerebbe un errore incomprensibile. Lo porto al
     # menu: e' quello che voleva, e il QR non deve essere perfetto per
     # funzionare.
-    if fuori and via == "/":
+    if da_fuori(request) and via == "/":
         return RedirectResponse(f"/m/{TAVOLO_PREDEFINITO}")
 
     pubblico = (via.startswith("/m/") or via == "/api/ordine"
-                or via.startswith("/static"))
-    if not pubblico and fuori:
-        return HTMLResponse(CHIUSO, status_code=403)
-    return await call_next(request)
+                or via.startswith("/img/") or via.startswith("/static")
+                or via in ("/entra", "/api/entra"))
+    if pubblico or puo_entrare(request):
+        return await call_next(request)
+
+    # A una pagina mando la richiesta della password; a una chiamata di
+    # servizio un errore, perche' una pagina di login dentro una risposta
+    # automatica non la capirebbe nessuno.
+    if via.startswith("/api/") or via.startswith("/ws"):
+        return JSONResponse({"errore": "serve la password"}, status_code=401)
+    return RedirectResponse("/entra")
+
+
+@app.get("/entra")
+async def entra_pagina() -> HTMLResponse:
+    return HTMLResponse(PAGINA_ENTRA)
+
+
+@app.post("/api/entra")
+async def entra(dati: dict):
+    pw = password_cassa()
+    if not pw:
+        return {"ok": False, "motivo": "nessuna password impostata"}
+    if not hmac.compare_digest(str(dati.get("password", "")), pw):
+        time.sleep(0.6)                      # scoraggia chi prova a tentativi
+        return {"ok": False}
+    r = JSONResponse({"ok": True})
+    r.set_cookie("lm_cassa", gettone(pw), max_age=60 * 60 * 24 * 30,
+                 httponly=True, samesite="lax")
+    return r
 clienti: set[WebSocket] = set()
 seriale_aperta: list = []          # la Serial viva, per poter mandare comandi
 

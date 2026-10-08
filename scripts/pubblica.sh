@@ -9,10 +9,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-UTENTE="${UTENTE:-tavolo}"
+UTENTE="${UTENTE:-centralino}"
 HOST="${HOST:-65.21.93.36}"
 CHIAVE="${CHIAVE:-$HOME/.ssh/leggimenu_tavolo}"
-REMOTA="${REMOTA:-/home/$UTENTE/app}"
+REMOTA="${REMOTA:-/home/$UTENTE/app-tavolo}"
 
 [ -f "$CHIAVE" ] || { echo "manca la chiave $CHIAVE"; exit 1; }
 
@@ -32,4 +32,4 @@ ssh -i "$CHIAVE" "$UTENTE@$HOST" "touch $REMOTA/RICARICA"
 echo "· aspetto che i worker nuovi rispondano"
 sleep 4
 ssh -i "$CHIAVE" "$UTENTE@$HOST" \
-  "curl -s -o /dev/null -w 'in locale sul server: %{http_code}\n' http://127.0.0.1:8099/cassa"
+  "curl -s -o /dev/null -w 'in locale sul server: %{http_code}\n' http://127.0.0.1:8099/m/7"
