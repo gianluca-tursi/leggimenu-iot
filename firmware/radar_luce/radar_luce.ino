@@ -419,7 +419,11 @@ static void eseguiComando(char c) {
       accesiOra = 0;
       animGiri = 0;
       accendi(0);
-      azzeraAncore();                          // il tavolo e' sgombro: ritaro
+      // NIENTE ritaratura qui. L'avevo messa pensando "il tavolo si svuota, e'
+      // il momento giusto": invece chi preme e' in sala e i clienti si stanno
+      // ancora alzando, quindi li memorizzavo come mobili e da quel momento il
+      // radar li scartava. Il tavolo non si riapriva piu' e sembrava rotto.
+      // La ritaratura si chiede apposta con 'R', a sensore libero.
       Serial1.println("L");
       Serial.printf(">>> tavolo liberato: pannello a \"prenotato\", LED spenti"
                     " (radar ignorato per %lu s)\n", (unsigned long)(pausaMs / 1000));
@@ -429,12 +433,6 @@ static void eseguiComando(char c) {
       Serial1.println("?");
       Serial.println(">>> chiesto al pannello se c'e'; se non risponde entro"
                      " un secondo, il filo o il suo firmware non vanno");
-      break;
-
-    case 'D':                                  // annuncio dalla cassa
-      Serial1.println("D");
-      avviaStrisciata(2, accesiOra < 0 ? 0 : accesiOra);
-      Serial.println(">>> annuncio mostrato sul pannello");
       break;
 
     case 'Q':                                  // rimetti il QR del menu
@@ -478,8 +476,9 @@ static void eseguiComando(char c) {
 /* Una riga dalla dashboard o dal monitor seriale. */
 static void eseguiRiga(const char *r) {
   // "X:testo" -> lo giro al pannello cosi' com'e'
-  if (r[1] == ':' && strchr("NOGUQVBCHIJ", r[0])) {
+  if (r[1] == ':' && strchr("NOGUQVBCD", r[0])) {
     Serial1.println(r);
+    if (r[0] == 'D') avviaStrisciata(2, accesiOra < 0 ? 0 : accesiOra);
     // La Q porta la chiave del WiFi: la inoltro ma non la scrivo nei log, che
     // finiscono nel terminale e nelle registrazioni.
     if (r[0] == 'Q') Serial.println(">>> al pannello: Q: (rete wifi)");

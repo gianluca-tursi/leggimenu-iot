@@ -186,7 +186,9 @@ static int centrata(const char *testo, const GFXfont *font, int y) {
   int16_t x1, y1; uint16_t w, h;
   epd.setFont(font);
   epd.getTextBounds(testo, 0, y, &x1, &y1, &w, &h);
-  epd.setCursor((epd.width() - (int)w) / 2, y);
+  int x = (epd.width() - (int)w) / 2;
+  if (x < 4) x = 4;            // mai fuori dal bordo: meglio stretto che tagliato
+  epd.setCursor(x, y);
   epd.print(testo);
   return y + h;
 }
@@ -291,19 +293,30 @@ static void schermoOrdine() {
   }
 }
 
-/* Spezza un testo in due righe senza tagliare le parole a meta'. */
-static void dueRighe(const char *testo, int larghezza, int y1, int y2,
+/* Spezza un testo in due righe senza tagliare le parole a meta'.
+   Misura davvero quanto occupa invece di contare i caratteri: contandoli
+   avevo fatto uscire dallo schermo la V di "Va bene con formaggio e pepato". */
+static void dueRighe(const char *testo, int /*non usato*/, int y1, int y2,
                      const GFXfont *font) {
-  int n = strlen(testo);
-  if (n <= larghezza) { centrata(testo, font, y1); return; }
-  int taglio = larghezza;
-  while (taglio > 0 && testo[taglio] != ' ') taglio--;
-  if (!taglio) taglio = larghezza;
-  char a[48], b[48];
-  snprintf(a, sizeof(a), "%.*s", taglio, testo);
-  snprintf(b, sizeof(b), "%s", testo + taglio + 1);
+  const int utile = epd.width() - 16;
+  int16_t bx, by; uint16_t bw, bh;
+  epd.setFont(font);
+  epd.getTextBounds(testo, 0, y1, &bx, &by, &bw, &bh);
+  if ((int)bw <= utile) { centrata(testo, font, y1); return; }
+
+  // Arretro all'ultimo spazio che ci sta davvero.
+  char a[64];
+  int taglio = strlen(testo);
+  while (taglio > 1) {
+    while (taglio > 1 && testo[taglio] != ' ') taglio--;
+    snprintf(a, sizeof(a), "%.*s", taglio, testo);
+    epd.getTextBounds(a, 0, y1, &bx, &by, &bw, &bh);
+    if ((int)bw <= utile) break;
+    taglio--;
+  }
+  if (taglio <= 1) { centrata(testo, font, y1); return; }   // una parola sola
   centrata(a, font, y1);
-  centrata(b, font, y2);
+  centrata(testo + taglio + 1, font, y2);
 }
 
 static void schermoVino() {
@@ -391,13 +404,22 @@ static void comando(const char *r) {
     ricorda();
     Serial.println("[link] <- Q: (rete wifi aggiornata)");   // la chiave non si stampa
     return;
-  } else if (r[0] == 'H' && r[1] == ':') {
-    strncpy(annTitolo, r + 2, sizeof(annTitolo) - 1);
-  } else if (r[0] == 'I' && r[1] == ':') {
-    strncpy(annRiga1, r + 2, sizeof(annRiga1) - 1);
-  } else if (r[0] == 'J' && r[1] == ':') {
-    strncpy(annRiga2, r + 2, sizeof(annRiga2) - 1);
-  } else if (r[0] == 'D' && r[1] == 0) {
+  } else if (r[0] == 'D' && r[1] == ':') {
+    // Tutto l'annuncio in una riga sola: "D:titolo|riga1|riga2".
+    // Prima arrivava in tre comandi separati, e se uno si perdeva restava
+    // mezzo annuncio vecchio sotto il titolo nuovo - un evento con sotto lo
+    // sconto dell'offerta di prima.
+    annTitolo[0] = annRiga1[0] = annRiga2[0] = 0;
+    const char *p1 = r + 2;
+    const char *b1 = strchr(p1, '|');
+    const char *b2 = b1 ? strchr(b1 + 1, '|') : nullptr;
+    size_t n0 = b1 ? (size_t)(b1 - p1) : strlen(p1);
+    snprintf(annTitolo, sizeof(annTitolo), "%.*s", (int)n0, p1);
+    if (b1) {
+      size_t n1 = b2 ? (size_t)(b2 - b1 - 1) : strlen(b1 + 1);
+      snprintf(annRiga1, sizeof(annRiga1), "%.*s", (int)n1, b1 + 1);
+    }
+    if (b2) snprintf(annRiga2, sizeof(annRiga2), "%s", b2 + 1);
     copertiDopo = (copertiMostrati > 0) ? copertiMostrati : 1;
     copertiChiesti = MOSTRA_ANNUNCIO;
   } else if (r[0] == 'B' && r[1] == ':') {

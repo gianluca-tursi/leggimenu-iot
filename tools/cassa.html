@@ -181,6 +181,7 @@
 
     <div class="sottotitolo" id="notaScansioni" style="margin-top:12px"></div>
 
+    <button class="pulsante quieto" id="apriAMano">Apri il tavolo a mano</button>
     <button class="pulsante quieto" id="rimettiQr">Rimetti il QR del menu sul tavolo</button>
     <button class="pulsante" id="libera">Il pasto è finito · libera il tavolo</button>
   </div>
@@ -195,7 +196,7 @@
 
   <div class="velo" id="velo">
     <div class="modale">
-      <h3>Qualcuno si è seduto</h3>
+      <h3 id="modaleTitolo">Qualcuno si è seduto</h3>
       <p id="modaleNota">Il sensore ne ha rilevato uno. Quanti sono davvero?</p>
       <p style="margin:-14px 0 16px;font-size:13px" id="modaleAiuto">Tocca il numero: il tavolo si apre.</p>
       <div class="scelte" id="scelte"></div>
@@ -474,6 +475,7 @@ let scelto = 0, tavoloConfermato = false;
 
 function apriModale(rilevati){
   if(tavoloConfermato) return;
+  q('modaleTitolo').textContent = rilevati ? 'Qualcuno si è seduto' : 'Apri il tavolo';
   scelto = Math.max(1, rilevati || 1);
   q('modaleNota').textContent = rilevati
     ? `Il sensore ne ha rilevat${rilevati===1?'o uno':'i '+rilevati}. Quanti sono davvero?`
@@ -635,6 +637,10 @@ function collega(){
   };
 }
 collega();
+
+// Il radar al centro di un tavolo rotondo non vede tutti, e a volte non vede
+// nessuno. Serve poter aprire il tavolo lo stesso, senza aspettarlo.
+q('apriAMano').onclick = ()=>{ tavoloConfermato = false; apriModale(0); };
 
 q('rimettiQr').onclick = async ()=>{
   const b = q('rimettiQr'); b.disabled = true;

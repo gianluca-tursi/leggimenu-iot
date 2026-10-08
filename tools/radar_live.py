@@ -167,14 +167,12 @@ async def al_pannello(titolo: str, riga1: str = "", riga2: str = "") -> bool:
     """Un annuncio sul pannello del tavolo: tre righe e via."""
     if not seriale_aperta:
         return False
+    # Una riga sola: cosi' non puo' restare mezzo annuncio vecchio sotto il
+    # titolo nuovo se un pezzo si perde per strada.
+    pezzi = [accorcia(titolo, 22), accorcia(riga1, 26), accorcia(riga2, 26)]
     try:
-        seriale_aperta[0].write(f"H:{accorcia(titolo, 22)}\n".encode())
-        time.sleep(0.05)
-        seriale_aperta[0].write(f"I:{accorcia(riga1, 26)}\n".encode())
-        time.sleep(0.05)
-        seriale_aperta[0].write(f"J:{accorcia(riga2, 26)}\n".encode())
-        time.sleep(0.05)
-        seriale_aperta[0].write(b"D\n")
+        seriale_aperta[0].write(("D:" + "|".join(p.replace("|", " ") for p in pezzi)
+                                 + "\n").encode())
         return True
     except Exception:
         return False
