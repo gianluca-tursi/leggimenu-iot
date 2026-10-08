@@ -431,6 +431,12 @@ static void eseguiComando(char c) {
                      " un secondo, il filo o il suo firmware non vanno");
       break;
 
+    case 'D':                                  // annuncio dalla cassa
+      Serial1.println("D");
+      avviaStrisciata(2, accesiOra < 0 ? 0 : accesiOra);
+      Serial.println(">>> annuncio mostrato sul pannello");
+      break;
+
     case 'Q':                                  // rimetti il QR del menu
       Serial1.println("Q");
       Serial.println(">>> QR del menu rimesso sul pannello");
@@ -472,7 +478,7 @@ static void eseguiComando(char c) {
 /* Una riga dalla dashboard o dal monitor seriale. */
 static void eseguiRiga(const char *r) {
   // "X:testo" -> lo giro al pannello cosi' com'e'
-  if (r[1] == ':' && strchr("NOGUQVBC", r[0])) {
+  if (r[1] == ':' && strchr("NOGUQVBCHIJ", r[0])) {
     Serial1.println(r);
     // La Q porta la chiave del WiFi: la inoltro ma non la scrivo nei log, che
     // finiscono nel terminale e nelle registrazioni.

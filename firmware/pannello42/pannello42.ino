@@ -130,6 +130,7 @@ static const uint32_t MIN_FRA_DISEGNI_MS = 4000;
 static const int MOSTRA_WIFI   = -7;
 static const int MOSTRA_ORDINE = -8;
 static const int MOSTRA_VINO   = -9;
+static const int MOSTRA_ANNUNCIO = -10;
 static const int NIENTE        = -1;   // nessuna richiesta in sospeso
 
 // L'ordine arrivato dal telefono. Otto righe bastano per un tavolo: se ne
@@ -154,15 +155,24 @@ static const uint32_t DURATA_VINO_MS   = 45000;   // 45 s
 char vinoNome[40]   = "";
 char vinoMotivo[40] = "";
 
+// Un annuncio dalla cassa: offerta del giorno, evento in arrivo. Tre righe,
+// perche' su un tavolo nessuno legge un paragrafo.
+static const uint32_t DURATA_ANNUNCIO_MS = 60000;
+char annTitolo[32] = "";
+char annRiga1[34]  = "";
+char annRiga2[34]  = "";
+
 int      copertiDopo = 1;      // a cosa tornare quando la speciale finisce
 uint32_t specialeDa  = 0;      // da quando e' sullo schermo (0 = nessuna)
 
 static bool eSpeciale(int c) {
-  return c == MOSTRA_WIFI || c == MOSTRA_ORDINE || c == MOSTRA_VINO;
+  return c == MOSTRA_WIFI || c == MOSTRA_ORDINE || c == MOSTRA_VINO
+      || c == MOSTRA_ANNUNCIO;
 }
 static uint32_t durataSpeciale(int c) {
-  if (c == MOSTRA_ORDINE) return DURATA_ORDINE_MS;
-  if (c == MOSTRA_VINO)   return DURATA_VINO_MS;
+  if (c == MOSTRA_ORDINE)   return DURATA_ORDINE_MS;
+  if (c == MOSTRA_VINO)     return DURATA_VINO_MS;
+  if (c == MOSTRA_ANNUNCIO) return DURATA_ANNUNCIO_MS;
   return DURATA_WIFI_MS;
 }
 
@@ -309,6 +319,16 @@ static void schermoVino() {
   centrata("chiedilo al cameriere", &FreeMono9pt7b, 360);
 }
 
+static void schermoAnnuncio() {
+  dueRighe(annTitolo, 13, 70, 112, &FreeMonoBold18pt7b);
+  epd.drawFastHLine(50, 146, epd.width() - 100, GxEPD_BLACK);
+  if (annRiga1[0]) centrata(annRiga1, &FreeMono12pt7b, 188);
+  if (annRiga2[0]) centrata(annRiga2, &FreeMono12pt7b, 218);
+
+  // Il QR resta: l'annuncio e' un richiamo, il menu e' quello che serve.
+  disegnaQR(URL_MENU, 246, 130);
+}
+
 static void disegna(int coperti) {
   epd.setRotation(1);                       // 400x300 -> 300x400, verticale
   epd.setTextColor(GxEPD_BLACK);
@@ -319,7 +339,8 @@ static void disegna(int coperti) {
   epd.firstPage();
   do {
     epd.fillScreen(GxEPD_WHITE);
-    if (coperti == MOSTRA_VINO)      schermoVino();
+    if (coperti == MOSTRA_ANNUNCIO)  schermoAnnuncio();
+    else if (coperti == MOSTRA_VINO) schermoVino();
     else if (coperti == MOSTRA_ORDINE) schermoOrdine();
     else if (coperti == MOSTRA_WIFI) schermoWifi();
     else if (coperti > 0)       schermoBenvenuto();
@@ -370,6 +391,15 @@ static void comando(const char *r) {
     ricorda();
     Serial.println("[link] <- Q: (rete wifi aggiornata)");   // la chiave non si stampa
     return;
+  } else if (r[0] == 'H' && r[1] == ':') {
+    strncpy(annTitolo, r + 2, sizeof(annTitolo) - 1);
+  } else if (r[0] == 'I' && r[1] == ':') {
+    strncpy(annRiga1, r + 2, sizeof(annRiga1) - 1);
+  } else if (r[0] == 'J' && r[1] == ':') {
+    strncpy(annRiga2, r + 2, sizeof(annRiga2) - 1);
+  } else if (r[0] == 'D' && r[1] == 0) {
+    copertiDopo = (copertiMostrati > 0) ? copertiMostrati : 1;
+    copertiChiesti = MOSTRA_ANNUNCIO;
   } else if (r[0] == 'B' && r[1] == ':') {
     strncpy(vinoNome, r + 2, sizeof(vinoNome) - 1);
   } else if (r[0] == 'C' && r[1] == ':') {

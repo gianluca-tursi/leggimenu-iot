@@ -19,3 +19,6 @@ bin/
 
 # configurazione locale della macchina, con segreti
 .env.locale
+
+# dati del gestore: eventi e immagini caricate
+dati/

@@ -24,7 +24,8 @@ from pathlib import Path
 
 import serial
 import uvicorn
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import (FastAPI, File, Form, Request, UploadFile, WebSocket,
+                     WebSocketDisconnect)
 from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
                                RedirectResponse)
 
@@ -139,6 +140,44 @@ def piatti_ordinabili() -> list[dict]:
     return voci
 
 
+# --- offerte ed eventi ----------------------------------------------------
+# Roba del gestore, non del tavolo: resta su disco e sopravvive ai riavvii,
+# perche' un evento lo si prepara la mattina e lo si manda la sera.
+DATI = QUI.parent / "dati"
+IMMAGINI = DATI / "immagini"
+FILE_EVENTI = DATI / "eventi.json"
+DATI.mkdir(exist_ok=True)
+IMMAGINI.mkdir(exist_ok=True)
+
+
+def leggi_eventi() -> list[dict]:
+    try:
+        return json.loads(FILE_EVENTI.read_text())
+    except Exception:
+        return []
+
+
+def scrivi_eventi(lista: list[dict]) -> None:
+    FILE_EVENTI.write_text(json.dumps(lista, ensure_ascii=False, indent=1))
+
+
+async def al_pannello(titolo: str, riga1: str = "", riga2: str = "") -> bool:
+    """Un annuncio sul pannello del tavolo: tre righe e via."""
+    if not seriale_aperta:
+        return False
+    try:
+        seriale_aperta[0].write(f"H:{accorcia(titolo, 22)}\n".encode())
+        time.sleep(0.05)
+        seriale_aperta[0].write(f"I:{accorcia(riga1, 26)}\n".encode())
+        time.sleep(0.05)
+        seriale_aperta[0].write(f"J:{accorcia(riga2, 26)}\n".encode())
+        time.sleep(0.05)
+        seriale_aperta[0].write(b"D\n")
+        return True
+    except Exception:
+        return False
+
+
 def accorcia(testo: str, massimo: int) -> str:
     """Taglia una riga per il pannello senza spezzare le parole.
 
@@ -190,6 +229,8 @@ eventi: list[dict] = []
 # l'unica cosa che fa agire qualcuno.
 STATI = ["inviato", "preparazione", "servito", "conto", "pagato"]
 ordine_corrente: dict = {}
+offerta_viva: dict = {}
+evento_vivo: dict = {}
 # Chi ha inquadrato il QR, in questa sessione. Il biscotto da solo non basta:
 # la fotocamera di iOS apre il link in una finestra che spesso non lo conserva,
 # e lo stesso telefono veniva contato una volta per scansione. Quindi riconosco
@@ -787,6 +828,96 @@ async def coperti(dati: dict):
         except Exception as e:
             return {"ok": True, "nodo": f"non raggiunto: {e}"}
     return {"ok": True}
+
+
+@app.post("/api/offerta")
+async def offerta(dati: dict):
+    """Un'offerta su un piatto, mandata ai tavoli."""
+    piatto = MENU_BY_ID.get(str(dati.get("piatto_id", "")))
+    if not piatto:
+        return {"ok": False, "motivo": "piatto sconosciuto"}
+    try:
+        sconto = max(1, min(90, int(dati.get("sconto", 0))))
+    except (TypeError, ValueError):
+        return {"ok": False, "motivo": "sconto non valido"}
+
+    pieno = float(piatto["prezzo"])
+    scontato = round(pieno * (100 - sconto) / 100, 2)
+    off = {"piatto": piatto["nome"], "sconto": sconto,
+           "prezzo": scontato, "pieno": pieno,
+           "messaggio": (dati.get("messaggio") or "").strip()}
+    offerta_viva.clear(); offerta_viva.update(off)
+
+    await manda_a_tutti(registra_evento("offerta", **off))
+    await manda_a_tutti({"tipo": "offerta", **off})
+    arrivata = await al_pannello(piatto["nome"],
+                                 f"-{sconto}% oggi",
+                                 f"{scontato:.2f} invece di {pieno:.2f}".replace(".", ","))
+    return {"ok": True, "pannello": arrivata}
+
+
+@app.get("/api/piatti")
+async def api_piatti():
+    """La carta, per chi deve scegliere un piatto da scontare."""
+    return {"piatti": piatti_ordinabili()}
+
+
+@app.get("/api/eventi")
+async def lista_eventi():
+    return {"eventi": leggi_eventi()}
+
+
+@app.post("/api/evento")
+async def crea_evento(titolo: str = Form(...), descrizione: str = Form(""),
+                      quando: str = Form(""), immagine: UploadFile | None = File(None)):
+    """Un evento futuro da promuovere nelle giornate scarse."""
+    ev = {"id": uuid.uuid4().hex[:8], "titolo": titolo.strip(),
+          "descrizione": descrizione.strip(), "quando": quando.strip(),
+          "immagine": "", "creato": time.time()}
+    if immagine is not None and immagine.filename:
+        est = pathlib.Path(immagine.filename).suffix.lower()
+        if est not in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+            return {"ok": False, "motivo": "formato immagine non accettato"}
+        nome = f"{ev['id']}{est}"
+        (IMMAGINI / nome).write_bytes(await immagine.read())
+        ev["immagine"] = nome
+    lista = leggi_eventi()
+    lista.insert(0, ev)
+    scrivi_eventi(lista[:30])
+    return {"ok": True, "evento": ev}
+
+
+@app.post("/api/evento/{eid}/invia")
+async def invia_evento(eid: str):
+    """Manda l'evento sui tavoli: sul pannello il titolo, il resto dietro al QR."""
+    ev = next((e for e in leggi_eventi() if e["id"] == eid), None)
+    if not ev:
+        return {"ok": False, "motivo": "evento non trovato"}
+    evento_vivo.clear(); evento_vivo.update(ev)
+    await manda_a_tutti(registra_evento("promozione", titolo=ev["titolo"],
+                                        quando=ev["quando"]))
+    arrivata = await al_pannello(ev["titolo"], ev["quando"],
+                                 "inquadra il QR per i dettagli")
+    return {"ok": True, "pannello": arrivata}
+
+
+@app.delete("/api/evento/{eid}")
+async def togli_evento(eid: str):
+    lista = leggi_eventi()
+    resta = [e for e in lista if e["id"] != eid]
+    for e in lista:
+        if e["id"] == eid and e.get("immagine"):
+            (IMMAGINI / e["immagine"]).unlink(missing_ok=True)
+    scrivi_eventi(resta)
+    return {"ok": True}
+
+
+@app.get("/img/{nome}")
+async def immagine(nome: str):
+    f = IMMAGINI / pathlib.Path(nome).name     # niente percorsi fantasiosi
+    if not f.exists():
+        return JSONResponse({"errore": "non c'e'"}, status_code=404)
+    return FileResponse(f)
 
 
 @app.post("/api/menu")

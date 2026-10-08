@@ -18,3 +18,4 @@ qrcode>=7.4
 
 # solo sul server: gunicorn fa da capo e ricambia i worker su SIGHUP
 gunicorn>=21.2
+python-multipart>=0.0.9   # per ricevere le immagini degli eventi
