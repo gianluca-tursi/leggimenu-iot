@@ -60,6 +60,11 @@ static const size_t  LUNG = 30;
 uint8_t buf[256];
 size_t  usati = 0;
 uint32_t byteTot = 0, frameTot = 0, ultimoFrame = 0, ultimaDiag = 0;
+
+// Quanti bersagli GREZZI manda il radar e a che distanza, prima di qualunque
+// filtro. Senza questo, "non mi vede" e "ti vede ma sei oltre la portata"
+// sembrano la stessa cosa, e si tira a indovinare.
+int grezziVisti = 0, grezziVicino = 0, grezziLontano = 0;
 static const uint32_t GUASTO_MS = 3000;
 
 // --- filo verso il pannello e-ink ---------------------------------------
@@ -377,6 +382,11 @@ static void esamina(const uint8_t *f) {
     int x = coord(gx) / 10, y = coord(gy) / 10, v = coord(gv);   // cm, cm, cm/s
     float dist = sqrtf((float)x * x + (float)y * y);
 
+    grezziVisti++;
+    int d = (int)dist;
+    if (!grezziVicino || d < grezziVicino) grezziVicino = d;
+    if (d > grezziLontano) grezziLontano = d;
+
     char stato;
     if (dist > PORTATA_CM)             stato = 'X';   // fuori dal tavolo
     else if (arredamento(x, y, v))     stato = 'F';   // mobile
@@ -612,6 +622,12 @@ void loop() {
     Serial.printf("[fissi] ignorati=%d taratura=%s tavolo=%d\n",
                   quantiFissi(), inTaratura ? "si" : "no",
                   tavoloAperto ? copertiTavolo : 0);
+    if (grezziVisti)
+      Serial.printf("[grezzi] %d letture, da %d a %d cm (portata %d)\n",
+                    grezziVisti, grezziVicino, grezziLontano, PORTATA_CM);
+    else
+      Serial.println("[grezzi] nessun bersaglio: il radar non vede proprio niente");
+    grezziVisti = grezziVicino = grezziLontano = 0;
     Serial.printf("[diagnosi] radar=%s byte ricevuti: %lu | frame validi: %lu\n",
                   vivo ? "ok" : "MUTO",
                   (unsigned long)byteTot, (unsigned long)frameTot);

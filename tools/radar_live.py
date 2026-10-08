@@ -490,6 +490,20 @@ Per il menu, inquadra il codice sul tavolo.</p></div></body></html>"""
 
 
 @app.middleware("http")
+async def niente_copie_vecchie(request: Request, call_next):
+    """Le pagine non vanno tenute in memoria dal browser.
+
+    Pubblichiamo spesso, e una pagina vecchia e' indistinguibile da un guasto:
+    il server ha i dati giusti, la pagina mostra altro, e si cerca il problema
+    dalla parte sbagliata. E' gia' successo.
+    """
+    r = await call_next(request)
+    if r.headers.get("content-type", "").startswith("text/html"):
+        r.headers["Cache-Control"] = "no-store, must-revalidate"
+    return r
+
+
+@app.middleware("http")
 async def chiudi_il_gestionale(request: Request, call_next):
     """Al cliente il menu e gli ordini; il resto a chi ha la password."""
     via = request.url.path
