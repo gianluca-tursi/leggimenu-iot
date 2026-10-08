@@ -651,8 +651,14 @@ q('rimettiQr').onclick = async ()=>{
 
 q('libera').onclick = async ()=>{
   const b = q('libera'); b.disabled = true;
-  try{ await fetch('/api/libera',{method:'POST'}); }catch(e){}
-  setTimeout(()=>{ b.disabled = false; }, 1500);
+  const scritta = b.textContent;
+  try{
+    const d = await (await fetch('/api/libera',{method:'POST'})).json();
+    // Il tavolo si chiude comunque, ma se il dispositivo non ha ricevuto il
+    // comando i suoi LED restano accesi: meglio dirlo che lasciarlo scoprire.
+    if(!d.nodo) b.textContent = 'tavolo chiuso — ma il dispositivo non risponde';
+  }catch(e){ b.textContent = 'non riuscito'; }
+  setTimeout(()=>{ b.textContent = scritta; b.disabled = false; }, 3000);
 };
 </script>
 </body>

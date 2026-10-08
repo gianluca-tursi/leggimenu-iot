@@ -735,23 +735,32 @@ async def reset():
 
 @app.post("/api/libera")
 async def libera():
-    """Il pasto e' finito: chiude il tavolo e rimanda il pannello a "prenotato"."""
-    if not seriale_aperta:
-        return {"ok": False, "motivo": "nodo non collegato"}
-    try:
-        seriale_aperta[0].write(b"F\n")
-        wifi_offerto[0] = False        # tavolo nuovo, suggerimento di nuovo utile
-        durata = int(time.time() - apertura[0]) if apertura else 0
-        await manda_a_tutti(registra_evento("liberato", durata=durata))
-        ordine_corrente.clear()
-        eventi.clear()                 # servizio chiuso: la cassa riparte pulita
-        dispositivi.clear()
-        apertura.clear()
-        confermato[0] = False
-        await manda_a_tutti(stato_tavolo())
-        return {"ok": True}
-    except Exception as e:
-        return {"ok": False, "motivo": str(e)}
+    """Il pasto e' finito: chiude il tavolo e rimanda il pannello a "prenotato".
+
+    Chiude SEMPRE, anche se il nodo non risponde. Liberare il tavolo e' prima
+    di tutto un fatto del gestionale: se il dispositivo e' staccato o il ponte
+    e' caduto, il cameriere deve comunque poter dire che il tavolo e' libero.
+    Prima si rifiutava di fare qualunque cosa, e il tavolo restava aperto nella
+    cassa senza che nessuno potesse chiuderlo.
+    """
+    raggiunto = False
+    if seriale_aperta:
+        try:
+            seriale_aperta[0].write(b"F\n")
+            raggiunto = True
+        except Exception:
+            pass
+
+    wifi_offerto[0] = False            # tavolo nuovo, suggerimento di nuovo utile
+    durata = int(time.time() - apertura[0]) if apertura else 0
+    await manda_a_tutti(registra_evento("liberato", durata=durata))
+    ordine_corrente.clear()
+    eventi.clear()                     # servizio chiuso: la cassa riparte pulita
+    dispositivi.clear()
+    apertura.clear()
+    confermato[0] = False
+    await manda_a_tutti(stato_tavolo())
+    return {"ok": True, "nodo": raggiunto}
 
 
 def _ip_locale() -> str:
