@@ -327,7 +327,9 @@ aggiornaPannello();
 
 /* ---------- websocket ---------- */
 function connetti(){
-  const ws=new WebSocket(`ws://${location.host}/ws`);
+  // wss: quando la pagina arriva da https il browser rifiuta un canale
+  // in chiaro, e lo fa senza dire niente - la pagina resta li' muta.
+  const ws=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws`);
   ws.onopen=()=>{
     if(!stat.t0) stat.t0=performance.now();
     $('led').classList.add('on');
