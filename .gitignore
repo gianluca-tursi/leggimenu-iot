@@ -22,3 +22,6 @@ bin/
 
 # dati del gestore: eventi e immagini caricate
 dati/
+
+# impronte dei firmware caricati
+.firmware-caricati/

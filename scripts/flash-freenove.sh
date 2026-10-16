@@ -10,6 +10,8 @@
 #   PORTA_OVERRIDE=/dev/cu.usbserial-0001 ./scripts/flash-freenove.sh
 set -e
 cd "$(dirname "$0")/.."
+
+
 # Specchio del controllo in flash.sh: qui si carica per ESP32 classico, e
 # sulla porta puo' esserci la CrowPanel.
 PORTA_C="${PORTA_OVERRIDE:-$(ls /dev/cu.wchusbserial* 2>/dev/null | head -1)}"

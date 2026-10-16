@@ -8,6 +8,19 @@
 set -e
 cd "$(dirname "$0")/.."
 
+# Annoto l'impronta dei sorgenti appena caricati, cosi' versioni.sh puo' dire
+# se una scheda e' rimasta indietro. Una modifica tocca spesso nodo, pannello e
+# server insieme, ed e' gia' successo due volte di caricarne solo due.
+registra_impronta() {
+  local sketch="$1" nome; nome=$(basename "$sketch")
+  mkdir -p .firmware-caricati
+  find "$sketch" -type f \( -name '*.ino' -o -name '*.c' -o -name '*.cpp' -o -name '*.h' \) \
+    -exec shasum -a 256 {} + 2>/dev/null | sort | shasum -a 256 | cut -c1-12 \
+    > ".firmware-caricati/$nome"
+}
+
+
+
 CLI="/Applications/Arduino IDE.app/Contents/Resources/app/lib/backend/resources/arduino-cli"
 # CDCOnBoot=default: su questa scheda la USB passa da un CH340 su UART0,
 # non dalla USB nativa dell'S3. Con "cdc" il monitor resterebbe muto.
@@ -144,6 +157,7 @@ echo
 echo "carico..."
 "$CLI" upload -p "$PORTA" --fqbn "$FQBN" "$SKETCH"
 echo
+registra_impronta "$SKETCH"
 echo "✅ caricato."
 fi
 
