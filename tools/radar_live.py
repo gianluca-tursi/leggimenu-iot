@@ -48,6 +48,10 @@ RE_LUCE = re.compile(r">>> luce:\s*(\d+)")
 # aperta dopo l'avvio del nodo non vedrebbe mai il valore corrente.
 RE_PAUSA = re.compile(r"\[pausa\]\s*(\d+)")
 RE_APERTO = re.compile(r">>> tavolo aperto:\s*(\d+)")
+# Quello che il nodo racconta di se'. Mentre il ponte gira, la seriale la tiene
+# lui e noi non vediamo piu' niente: queste righe sono l'unico modo di sapere
+# se un comando e' arrivato davvero al dispositivo.
+RE_DETTO = re.compile(r">>>\s*(.+)")
 
 PAGINA_MENU = """<!doctype html><html lang="it"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -178,12 +182,30 @@ async def al_pannello(titolo: str, riga1: str = "", riga2: str = "") -> bool:
         return False
 
 
+# Il pannello usa un font senza accenti: "venerdi'" scritto con la i accentata
+# diventa due simboli a caso. Li tolgo qui, una volta per tutte, invece di
+# chiedere a chi scrive un evento di ricordarsene.
+ACCENTI = str.maketrans({
+    "à": "a", "á": "a", "è": "e", "é": "e", "ì": "i", "í": "i",
+    "ò": "o", "ó": "o", "ù": "u", "ú": "u", "ç": "c",
+    "À": "A", "È": "E", "É": "E", "Ì": "I", "Ò": "O", "Ù": "U",
+    "“": '"', "”": '"', "‘": "'", "’": "'", "–": "-", "—": "-", "…": "...",
+})
+
+
+def senza_accenti(testo: str) -> str:
+    pulito = testo.translate(ACCENTI)
+    # quello che resta fuori dall'alfabeto del pannello lo tolgo e basta
+    return "".join(c for c in pulito if 32 <= ord(c) <= 126)
+
+
 def accorcia(testo: str, massimo: int) -> str:
     """Taglia una riga per il pannello senza spezzare le parole.
 
     Tagliare al carattere faceva finire "Tagliatelle al ragu di cinghiale" in
     "...di c": il pezzo mozzato non si capisce ed e' peggio di una riga corta.
     """
+    testo = senza_accenti(testo)
     if len(testo) <= massimo:
         return testo
     corto = testo[:massimo].rstrip()
@@ -642,6 +664,10 @@ class Lettore:
         if ap:
             self.manda(
                 {"tipo": "apertura", "coperti": int(ap.group(1))})
+            return
+        dt = RE_DETTO.search(riga)
+        if dt:
+            self.manda({"tipo": "nodo", "dice": dt.group(1).strip()})
             return
         pa = RE_PAUSA.search(riga)
         if pa:
