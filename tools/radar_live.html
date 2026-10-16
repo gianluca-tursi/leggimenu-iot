@@ -111,6 +111,8 @@ button:hover{background:#2c3644}
       <h2>Menu e WiFi</h2>
       <label class="campo"><span>menu</span>
         <input id="fUrl" maxlength="63" placeholder="http://192.168.1.x:8080/m/7"></label>
+      <label class="campo"><span>recensione</span>
+        <input id="fRec" maxlength="63" placeholder="link della recensione Google"></label>
       <label class="campo"><span>rete</span>
         <input id="fSsid" maxlength="31" placeholder="nome della rete WiFi"></label>
       <label class="campo"><span>chiave</span>
@@ -188,7 +190,8 @@ document.getElementById('salvaQr').onclick=async()=>{
   try{
     const r=await fetch('/api/qr',{method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({url:fUrl.value, ssid:fSsid.value, password:fPwd.value})});
+      body:JSON.stringify({url:fUrl.value, recensione:fRec.value,
+                           ssid:fSsid.value, password:fPwd.value})});
     const d=await r.json();
     esito.textContent = d.ok ? 'mandato - il pannello si ridisegna fra qualche secondo'
                              : ('non riuscito: '+(d.motivo||'?'));

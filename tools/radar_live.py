@@ -835,6 +835,9 @@ async def qr(dati: dict):
     url = (dati.get("url") or "").strip()
     if url:
         righe.append(f"U:{url}\n".encode())
+    recensione = (dati.get("recensione") or "").strip()
+    if recensione:
+        righe.append(f"E:{recensione}\n".encode())
     ssid = (dati.get("ssid") or "").strip()
     if ssid:
         # Formato standard riconosciuto da iOS e Android per entrare in rete.
@@ -920,6 +923,13 @@ async def ordine_stato(dati: dict):
     atteso = int(time.time() - ordine_corrente.get("da", time.time()))
     ordine_corrente["stato"] = nuovo
     ordine_corrente["da"] = time.time()      # il cronometro riparte da qui
+    # Al conto il pasto e' finito: e' l'ultimo momento in cui il cliente e'
+    # ancora li' e di buon umore. Dopo, al tavolo non guarda piu' nessuno.
+    if nuovo == "conto" and seriale_aperta:
+        try:
+            seriale_aperta[0].write(b"E\n")
+        except Exception:
+            pass
     await manda_a_tutti(registra_evento("stato", stato=nuovo, atteso=atteso))
     await manda_a_tutti({"tipo": "ordine_stato", **ordine_corrente})
 

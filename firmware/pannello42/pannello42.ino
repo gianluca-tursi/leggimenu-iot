@@ -60,7 +60,8 @@ static int versionePer(const char *testo) {
 // Nome e orario arrivano dalla dashboard e restano nella NVS: se il tavolo si
 // spegne e si riaccende deve ritrovarsi la sua prenotazione, non i valori di
 // fabbrica. Sono buffer, non costanti, apposta.
-char URL_MENU[64]    = "https://leggimenu.it";
+char URL_MENU[64]       = "https://leggimenu.it";
+char URL_RECENSIONE[64] = "https://g.page/r/trattoria-demo/review";
 char QR_WIFI[80]     = "";                   // "WIFI:T:WPA;S:rete;P:chiave;;"
 char NOME_TAVOLO[24] = "Tavolo 7";
 char ORARIO[28]      = "riservato ore 20.00";
@@ -72,6 +73,7 @@ static void ricorda() {
   memoria.putString("orario", ORARIO);
   memoria.putString("ospite", OSPITE);
   memoria.putString("url",    URL_MENU);
+  memoria.putString("recens", URL_RECENSIONE);
   memoria.putString("wifi",   QR_WIFI);      // contiene la chiave: non stamparla
 }
 
@@ -80,6 +82,7 @@ static void rileggi() {
   memoria.getString("orario", ORARIO,      sizeof(ORARIO));
   memoria.getString("ospite", OSPITE,      sizeof(OSPITE));
   memoria.getString("url",    URL_MENU,    sizeof(URL_MENU));
+  memoria.getString("recens", URL_RECENSIONE, sizeof(URL_RECENSIONE));
   memoria.getString("wifi",   QR_WIFI,     sizeof(QR_WIFI));
 }
 
@@ -131,6 +134,12 @@ static const int MOSTRA_WIFI   = -7;
 static const int MOSTRA_ORDINE = -8;
 static const int MOSTRA_VINO   = -9;
 static const int MOSTRA_ANNUNCIO = -10;
+static const int MOSTRA_RECENSIONE = -11;
+
+// Nota: chiedere una schermata speciale alza SEMPRE forzaRidisegno. Il
+// confronto che decide se ridisegnare guarda il numero di coperti, e due
+// annunci diversi hanno lo stesso numero: senza, la seconda offerta non
+// comparirebbe mai perche' "e' gia' a video un annuncio".
 static const int NIENTE        = -1;   // nessuna richiesta in sospeso
 
 // L'ordine arrivato dal telefono. Otto righe bastano per un tavolo: se ne
@@ -158,6 +167,9 @@ char vinoMotivo[40] = "";
 // Un annuncio dalla cassa: offerta del giorno, evento in arrivo. Tre righe,
 // perche' su un tavolo nessuno legge un paragrafo.
 static const uint32_t DURATA_ANNUNCIO_MS = 60000;
+// La recensione resta finche' qualcuno non la toglie: il conto e' l'ultimo
+// momento utile, e un QR che sparisce mentre uno cerca il telefono e' sprecato.
+static const uint32_t DURATA_RECENSIONE_MS = 0;
 char annTitolo[32] = "";
 char annRiga1[34]  = "";
 char annRiga2[34]  = "";
@@ -167,12 +179,13 @@ uint32_t specialeDa  = 0;      // da quando e' sullo schermo (0 = nessuna)
 
 static bool eSpeciale(int c) {
   return c == MOSTRA_WIFI || c == MOSTRA_ORDINE || c == MOSTRA_VINO
-      || c == MOSTRA_ANNUNCIO;
+      || c == MOSTRA_ANNUNCIO || c == MOSTRA_RECENSIONE;
 }
 static uint32_t durataSpeciale(int c) {
   if (c == MOSTRA_ORDINE)   return DURATA_ORDINE_MS;
   if (c == MOSTRA_VINO)     return DURATA_VINO_MS;
-  if (c == MOSTRA_ANNUNCIO) return DURATA_ANNUNCIO_MS;
+  if (c == MOSTRA_ANNUNCIO)   return DURATA_ANNUNCIO_MS;
+  if (c == MOSTRA_RECENSIONE) return DURATA_RECENSIONE_MS;
   return DURATA_WIFI_MS;
 }
 
@@ -342,6 +355,16 @@ static void schermoAnnuncio() {
   disegnaQR(URL_MENU, 246, 130);
 }
 
+static void schermoRecensione() {
+  centrata("Grazie!",        &FreeMonoBold24pt7b, 62);
+  centrata("Com'e' andata?", &FreeMono12pt7b,     98);
+
+  disegnaQR(URL_RECENSIONE, 118, 200);
+
+  centrata("Lasciaci una recensione", &FreeMono9pt7b, 352);
+  centrata("ci aiuta davvero",        &FreeMono9pt7b, 378);
+}
+
 static void disegna(int coperti) {
   epd.setRotation(1);                       // 400x300 -> 300x400, verticale
   epd.setTextColor(GxEPD_BLACK);
@@ -352,7 +375,8 @@ static void disegna(int coperti) {
   epd.firstPage();
   do {
     epd.fillScreen(GxEPD_WHITE);
-    if (coperti == MOSTRA_ANNUNCIO)  schermoAnnuncio();
+    if (coperti == MOSTRA_RECENSIONE)     schermoRecensione();
+    else if (coperti == MOSTRA_ANNUNCIO)  schermoAnnuncio();
     else if (coperti == MOSTRA_VINO) schermoVino();
     else if (coperti == MOSTRA_ORDINE) schermoOrdine();
     else if (coperti == MOSTRA_WIFI) schermoWifi();
@@ -404,6 +428,13 @@ static void comando(const char *r) {
     ricorda();
     Serial.println("[link] <- Q: (rete wifi aggiornata)");   // la chiave non si stampa
     return;
+  } else if (r[0] == 'E' && r[1] == ':') {
+    strncpy(URL_RECENSIONE, r + 2, sizeof(URL_RECENSIONE) - 1);
+    ricorda();
+  } else if (r[0] == 'E' && r[1] == 0) {
+    copertiDopo = (copertiMostrati > 0) ? copertiMostrati : 1;
+    copertiChiesti = MOSTRA_RECENSIONE;
+    forzaRidisegno = true;
   } else if (r[0] == 'D' && r[1] == ':') {
     // Tutto l'annuncio in una riga sola: "D:titolo|riga1|riga2".
     // Prima arrivava in tre comandi separati, e se uno si perdeva restava
@@ -422,6 +453,7 @@ static void comando(const char *r) {
     if (b2) snprintf(annRiga2, sizeof(annRiga2), "%s", b2 + 1);
     copertiDopo = (copertiMostrati > 0) ? copertiMostrati : 1;
     copertiChiesti = MOSTRA_ANNUNCIO;
+    forzaRidisegno = true;
   } else if (r[0] == 'B' && r[1] == ':') {
     strncpy(vinoNome, r + 2, sizeof(vinoNome) - 1);
   } else if (r[0] == 'C' && r[1] == ':') {
@@ -435,6 +467,7 @@ static void comando(const char *r) {
   } else if (r[0] == 'Y' && r[1] == 0) {
     copertiDopo = (copertiMostrati > 0) ? copertiMostrati : 1;
     copertiChiesti = MOSTRA_VINO;
+    forzaRidisegno = true;
   } else if (r[0] == 'Z' && r[1] == 0) {
     nOrdine = 0;                                 // nuovo ordine in arrivo
   } else if (r[0] == 'V' && r[1] == ':') {
@@ -446,9 +479,11 @@ static void comando(const char *r) {
   } else if (r[0] == 'X' && r[1] == 0) {
     copertiDopo = (copertiMostrati > 0) ? copertiMostrati : 1;
     copertiChiesti = MOSTRA_ORDINE;
+    forzaRidisegno = true;
   } else if (r[0] == 'W' && r[1] == 0) {
     copertiDopo = (copertiMostrati > 0) ? copertiMostrati : 1;
     copertiChiesti = MOSTRA_WIFI;
+    forzaRidisegno = true;
   } else if (r[0] == 'G' && r[1] == ':') {
     strncpy(OSPITE, r + 2, sizeof(OSPITE) - 1);
     ricorda(); forzaRidisegno = true;
@@ -494,6 +529,16 @@ void loop() {
   static char riga[64];
   static size_t n = 0;
 
+  // Gli stessi comandi arrivano anche dall'USB: serve per provare le
+  // schermate con la scheda sul banco, senza rimontare il filo verso il nodo.
+  while (Serial.available()) {
+    static char rigaU[80]; static size_t nU = 0;
+    char c = Serial.read();
+    if (c == '\n' || c == '\r') {
+      if (nU) { rigaU[nU] = 0; comando(rigaU); nU = 0; }
+    } else if (nU < sizeof(rigaU) - 1) rigaU[nU++] = c;
+  }
+
   while (Serial1.available()) {
     char c = Serial1.read();
     if (c == '\n' || c == '\r') {
@@ -529,7 +574,8 @@ void loop() {
   }
 
   // Ridisegno solo se e' cambiato davvero e non troppo di frequente.
-  if (specialeDa && millis() - specialeDa > durataSpeciale(copertiMostrati)) {
+  uint32_t quanto = durataSpeciale(copertiMostrati);
+  if (specialeDa && quanto && millis() - specialeDa > quanto) {
     copertiChiesti = copertiDopo;              // il tempo e' scaduto
     specialeDa = 0;
     Serial.println("[pannello] schermata speciale finita, torno al menu");
