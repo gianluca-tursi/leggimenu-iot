@@ -168,6 +168,16 @@ int accesiOra = -1;
 
 static int coord(uint16_t g) { int v = g & 0x7FFF; return (g & 0x8000) ? v : -v; }
 
+/* Tutto quello che va al pannello passa di qui, con un segno davanti.
+   Serve perche' il filo, quando il nodo e' spento o scollegato, raccoglie
+   disturbi: prima o poi il rumore componeva per caso una "L" - comando valido
+   di una lettera - e il pannello tornava a "tavolo libero" da solo. Con il
+   segno davanti il caso non ci arriva piu'. */
+static void alPannello(const char *riga) {
+  Serial1.print('*');
+  Serial1.println(riga);
+}
+
 static void accendi(uint8_t quante);
 
 /* Lancia <giri> strisciate, poi lascia accesi <restano> LED. */
@@ -434,37 +444,37 @@ static void eseguiComando(char c) {
       // ancora alzando, quindi li memorizzavo come mobili e da quel momento il
       // radar li scartava. Il tavolo non si riapriva piu' e sembrava rotto.
       // La ritaratura si chiede apposta con 'R', a sensore libero.
-      Serial1.println("L");
+      alPannello("L");
       Serial.printf(">>> tavolo liberato: pannello a \"prenotato\", LED spenti"
                     " (radar ignorato per %lu s)\n", (unsigned long)(pausaMs / 1000));
       break;
 
     case 'P':                                  // il pannello e' vivo?
-      Serial1.println("?");
+      alPannello("?");
       Serial.println(">>> chiesto al pannello se c'e'; se non risponde entro"
                      " un secondo, il filo o il suo firmware non vanno");
       break;
 
     case 'E':                                  // chiedi la recensione
-      Serial1.println("E");
+      alPannello("E");
       avviaStrisciata(1, accesiOra < 0 ? 0 : accesiOra);
       Serial.println(">>> recensione mostrata sul pannello");
       break;
 
     case 'Q':                                  // rimetti il QR del menu
-      Serial1.println("Q");
+      alPannello("Q");
       Serial.println(">>> QR del menu rimesso sul pannello");
       break;
 
     case 'Y':                                  // abbinamento del vino
-      Serial1.println("Y");
+      alPannello("Y");
       avviaStrisciata(3, accesiOra < 0 ? 0 : accesiOra);
       Serial.println(">>> vino proposto sul pannello");
       break;
 
     case 'Z':                                  // inizio di un ordine nuovo
     case 'X':                                  // mostra l'ordine sul pannello
-      Serial1.println(c == 'Z' ? "Z" : "X");
+      alPannello(c == 'Z' ? "Z" : "X");
       if (c == 'X') {
         avviaStrisciata(2, accesiOra < 0 ? 0 : accesiOra);
         Serial.println(">>> ordine mandato al pannello");
@@ -472,7 +482,7 @@ static void eseguiComando(char c) {
       break;
 
     case 'W':                                  // qualcuno ha inquadrato il QR
-      Serial1.println("W");
+      alPannello("W");
       avviaStrisciata(2, accesiOra < 0 ? 0 : accesiOra);   // strisciata di richiamo
       Serial.println(">>> QR inquadrato: pannello sulla schermata WiFi");
       break;
@@ -493,7 +503,7 @@ static void eseguiComando(char c) {
 static void eseguiRiga(const char *r) {
   // "X:testo" -> lo giro al pannello cosi' com'e'
   if (r[1] == ':' && strchr("NOGUQVBCDE", r[0])) {
-    Serial1.println(r);
+    alPannello(r);
     if (r[0] == 'D') avviaStrisciata(2, accesiOra < 0 ? 0 : accesiOra);
     // La Q porta la chiave del WiFi: la inoltro ma non la scrivo nei log, che
     // finiscono nel terminale e nelle registrazioni.
@@ -510,8 +520,8 @@ static void eseguiRiga(const char *r) {
     copertiTavolo = n;
     tavoloAperto = n > 0;
     accesiOra = n;
-    if (n > 0) { avviaStrisciata(n, n); Serial1.printf("T:%d\n", n); }
-    else       { animGiri = 0; accendi(0); Serial1.println("L"); }
+    if (n > 0) { avviaStrisciata(n, n); { char t[16]; snprintf(t, sizeof(t), "T:%d", n); alPannello(t); } }
+    else       { animGiri = 0; accendi(0); alPannello("L"); }
     ultimoAnnuncio = millis();
     Serial.printf(">>> coperti confermati dalla cassa: %d\n", n);
     return;
@@ -552,7 +562,7 @@ void setup() {
   apriLog();
   azzeraAncore();
   Serial1.begin(115200, SERIAL_8N1, PIN_RX_PANNELLO, PIN_TX_PANNELLO);
-  Serial1.println("L");                      // parto dicendogli "tavolo libero"
+  alPannello("L");                      // parto dicendogli "tavolo libero"
   Serial.printf("pannello: parlo su IO%d, ascolto su IO%d\n",
                 PIN_TX_PANNELLO, PIN_RX_PANNELLO);
 
@@ -602,14 +612,14 @@ void loop() {
     copertiTavolo = quante;
     accesiOra = quante;
     avviaStrisciata(quante, quante);              // tanti giri quante persone
-    Serial1.printf("T:%u\n", quante);
+    { char t[16]; snprintf(t, sizeof(t), "T:%u", quante); alPannello(t); }
     ultimoAnnuncio = millis();
     Serial.printf(">>> tavolo aperto: %u coperti (pannello avvisato)\n", quante);
   }
   if (millis() - ultimoAnnuncio > RIPETI_STATO_MS) {
     ultimoAnnuncio = millis();
-    if (tavoloAperto) Serial1.printf("T:%u\n", copertiTavolo);
-    else              Serial1.println("L");
+    if (tavoloAperto) { char t[16]; snprintf(t, sizeof(t), "T:%u", copertiTavolo); alPannello(t); }
+    else              alPannello("L");
   }
 
   aggiornaLuce();

@@ -394,6 +394,13 @@ static void disegna(int coperti) {
 
 /* Una riga arrivata dal nodo radar. */
 static void comando(const char *r) {
+  // Ogni comando vero porta un '*' davanti. Il filo scollegato raccoglie
+  // disturbi, e senza questo segno il rumore ogni tanto componeva una "L" -
+  // comando valido di una lettera sola - riportando il pannello a "tavolo
+  // libero" da solo, in continuazione. Sembrava bloccato.
+  if (r[0] != '*') return;
+  r++;
+
   // Col nodo spento il filo resta flottante e raccoglie disturbi: arrivano byte
   // casuali che sembrano righe. Finche' e' rumore illeggibile fa solo sporcizia
   // nei log, ma prima o poi il caso produce una sequenza tipo "N:" e mi

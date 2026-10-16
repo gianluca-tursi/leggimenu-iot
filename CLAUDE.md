@@ -152,6 +152,12 @@ Verificati premendoli uno per uno. Evitare IO19 e IO20: sono l'USB nativo.
 negli esempi in rete (`GYE042A87`): con quella il BUSY non risponde e l'init
 muore in "Busy Timeout!". L'indizio sta scritto sul flat del display.
 
+**Ogni comando verso il pannello porta un `*` davanti.** Il filo, con il nodo
+spento o scollegato, raccoglie disturbi: prima o poi il rumore componeva per
+caso una `L` — comando valido di una lettera — e il pannello tornava a "tavolo
+libero" da solo, in continuazione. Sembrava bloccato. Il pannello accetta
+comandi anche dall'USB, per provare le schermate senza rimontare il filo.
+
 **Protocollo nodo ↔ pannello** (righe di testo, leggibili con un monitor):
 `T:<n>` coperti, `L` libero, `W` schermata WiFi, `Z`/`V:<riga>`/`X` ordine,
 `N:` `O:` `G:` `U:` `Q:` prenotazione e QR, `?` ping.
