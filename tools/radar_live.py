@@ -926,11 +926,15 @@ async def ordine(dati: dict):
         await manda_a_tutti(registra_evento("vino", **prop))
         if seriale_aperta:
             try:
-                # Al tavolo arriva solo l'essenziale: nome e perche'. Il
-                # pannello ha 27 caratteri per riga, non ci sta un discorso.
-                seriale_aperta[0].write(f"B:{vino.nome}\n".encode()[:40])
+                # Al tavolo arriva solo l'essenziale: nome e perche'.
+                #
+                # ATTENZIONE: accorciare va fatto sul TESTO, mai tagliando i
+                # byte della riga gia' pronta. Tagliando a 40 byte mi portavo
+                # via l'a capo, e il comando dopo si incollava alla fine del
+                # motivo: "...piatto struttY". Il vino non compariva mai.
+                seriale_aperta[0].write(f"B:{accorcia(vino.nome, 34)}\n".encode())
                 time.sleep(0.05)
-                seriale_aperta[0].write(f"C:{vino.motivo}\n".encode()[:40])
+                seriale_aperta[0].write(f"C:{accorcia(vino.motivo, 34)}\n".encode())
                 time.sleep(0.05)
                 seriale_aperta[0].write(b"Y\n")
             except Exception:

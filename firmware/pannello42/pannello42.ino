@@ -158,7 +158,7 @@ static const bool TASTI_A_DESTRA = true;
 // QUANTO RESTANO LE SCHERMATE SPECIALI prima di tornare al QR del menu.
 // Sono i due numeri da cambiare se durano troppo o troppo poco.
 static const uint32_t DURATA_WIFI_MS   = 30000;   // 30 s
-static const uint32_t DURATA_ORDINE_MS = 60000;   // 60 s
+static const uint32_t DURATA_ORDINE_MS = 15000;   // 15 s
 static const uint32_t DURATA_VINO_MS   = 45000;   // 45 s
 
 char vinoNome[40]   = "";
