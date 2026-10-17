@@ -157,7 +157,7 @@ static const bool TASTI_A_DESTRA = true;
 // dirglielo. Se restasse li', il QR del menu sparirebbe per il resto della cena.
 // QUANTO RESTANO LE SCHERMATE SPECIALI prima di tornare al QR del menu.
 // Sono i due numeri da cambiare se durano troppo o troppo poco.
-static const uint32_t DURATA_WIFI_MS   = 30000;   // 30 s
+static const uint32_t DURATA_WIFI_MS   = 15000;   // 15 s
 static const uint32_t DURATA_ORDINE_MS = 15000;   // 15 s
 static const uint32_t DURATA_VINO_MS   = 45000;   // 45 s
 
@@ -166,7 +166,7 @@ char vinoMotivo[40] = "";
 
 // Un annuncio dalla cassa: offerta del giorno, evento in arrivo. Tre righe,
 // perche' su un tavolo nessuno legge un paragrafo.
-static const uint32_t DURATA_ANNUNCIO_MS = 60000;
+static const uint32_t DURATA_ANNUNCIO_MS = 15000;   // offerte ed eventi
 // La recensione resta finche' qualcuno non la toglie: il conto e' l'ultimo
 // momento utile, e un QR che sparisce mentre uno cerca il telefono e' sprecato.
 static const uint32_t DURATA_RECENSIONE_MS = 0;
