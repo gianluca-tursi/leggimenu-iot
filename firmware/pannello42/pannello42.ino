@@ -159,7 +159,7 @@ static const bool TASTI_A_DESTRA = true;
 // Sono i due numeri da cambiare se durano troppo o troppo poco.
 static const uint32_t DURATA_WIFI_MS   = 15000;   // 15 s
 static const uint32_t DURATA_ORDINE_MS = 15000;   // 15 s
-static const uint32_t DURATA_VINO_MS   = 45000;   // 45 s
+static const uint32_t DURATA_VINO_MS   = 30000;   // 30 s
 
 char vinoNome[40]   = "";
 char vinoMotivo[40] = "";
@@ -167,6 +167,12 @@ char vinoMotivo[40] = "";
 // Un annuncio dalla cassa: offerta del giorno, evento in arrivo. Tre righe,
 // perche' su un tavolo nessuno legge un paragrafo.
 static const uint32_t DURATA_ANNUNCIO_MS = 15000;   // offerte ed eventi
+
+// Il vino arriva dal server un decimo di secondo dopo l'ordine. Se lo
+// mostrassi subito, l'ordine non si vedrebbe mai: il pannello ridisegna al
+// massimo ogni 4 secondi e disegna l'ultima cosa che gli e' arrivata. Quindi
+// il vino aspetta che l'ordine abbia finito i suoi 15 secondi.
+bool vinoInAttesa = false;
 // La recensione resta finche' qualcuno non la toglie: il conto e' l'ultimo
 // momento utile, e un QR che sparisce mentre uno cerca il telefono e' sprecato.
 static const uint32_t DURATA_RECENSIONE_MS = 0;
@@ -418,6 +424,7 @@ static void comando(const char *r) {
     if (eSpeciale(copertiMostrati)) copertiDopo = (n > 0) ? n : 1;
     else                            copertiChiesti = n;
   } else if (r[0] == 'L' && r[1] == 0) {
+    vinoInAttesa = false;                        // tavolo liberato: niente vino
     copertiChiesti = 0;
   } else if (r[0] == '?') {
     Serial1.printf("OK:%d\n", copertiMostrati);
@@ -468,15 +475,26 @@ static void comando(const char *r) {
   } else if (r[0] == 'Q' && r[1] == 0) {
     // "rimetti il QR": stessa cosa del tasto MENU, ma dalla cassa.
     specialeDa = 0;
+    vinoInAttesa = false;
     copertiChiesti = eSpeciale(copertiMostrati)
                      ? copertiDopo
                      : (copertiMostrati > 0 ? copertiMostrati : 1);
   } else if (r[0] == 'Y' && r[1] == 0) {
-    copertiDopo = (copertiMostrati > 0) ? copertiMostrati : 1;
-    copertiChiesti = MOSTRA_VINO;
-    forzaRidisegno = true;
+    if (copertiMostrati == MOSTRA_ORDINE || copertiChiesti == MOSTRA_ORDINE) {
+      vinoInAttesa = true;                        // dopo l'ordine, non al posto suo
+      Serial.println("[pannello] vino in attesa: prima finisce l'ordine");
+    } else {
+      // Mi segno i coperti solo se sto mostrando una schermata normale: se a
+      // video c'e' un'altra speciale, copertiMostrati e' un codice e non un
+      // numero di persone, e dopo il vino il tavolo da due diventerebbe da uno.
+      if (!eSpeciale(copertiMostrati))
+        copertiDopo = (copertiMostrati > 0) ? copertiMostrati : 1;
+      copertiChiesti = MOSTRA_VINO;
+      forzaRidisegno = true;
+    }
   } else if (r[0] == 'Z' && r[1] == 0) {
     nOrdine = 0;                                 // nuovo ordine in arrivo
+    vinoInAttesa = false;                        // il suo vino, se c'e', arriva dopo
   } else if (r[0] == 'V' && r[1] == ':') {
     if (nOrdine < MAX_RIGHE) {
       strncpy(ordine[nOrdine], r + 2, sizeof(ordine[0]) - 1);
@@ -566,6 +584,7 @@ void loop() {
         Serial.printf("[tasto] IO%d premuto\n", TASTI[i]);
         if (TASTI[i] == PIN_MENU) {
           specialeDa = 0;                               // annullo l'attesa
+          vinoInAttesa = false;
           // Se sto mostrando una schermata speciale, copertiMostrati e' un
           // valore in codice e non un numero di persone: devo tornare a quello
           // che mi ero segnato, altrimenti il tavolo da tre diventa da uno.
@@ -583,9 +602,16 @@ void loop() {
   // Ridisegno solo se e' cambiato davvero e non troppo di frequente.
   uint32_t quanto = durataSpeciale(copertiMostrati);
   if (specialeDa && quanto && millis() - specialeDa > quanto) {
-    copertiChiesti = copertiDopo;              // il tempo e' scaduto
     specialeDa = 0;
-    Serial.println("[pannello] schermata speciale finita, torno al menu");
+    if (copertiMostrati == MOSTRA_ORDINE && vinoInAttesa) {
+      vinoInAttesa = false;                    // finito l'ordine, ora il vino
+      copertiChiesti = MOSTRA_VINO;
+      forzaRidisegno = true;
+      Serial.println("[pannello] ordine finito, ora il vino");
+    } else {
+      copertiChiesti = copertiDopo;            // il tempo e' scaduto
+      Serial.println("[pannello] schermata speciale finita, torno al menu");
+    }
   }
 
   // ATTENZIONE al confronto: "mostra il WiFi" e "nessuna richiesta" sono due
