@@ -9,24 +9,32 @@ Stato: **prototipo funzionante**, in corsa per la Maker Faire.
 ## Cosa fa adesso
 
 ```
-persona che si siede
-   → radar la rileva
+persona che si siede (o il cameriere: "Apri il tavolo a mano" dalla cassa)
    → LED: una strisciata per persona, poi restano accesi tanti quanti i coperti
    → pannello e-ink: "Benvenuto <nome>" + QR del menu
-   → la dashboard cassa vede il tavolo aprirsi
+   → la cassa vede il tavolo aprirsi e conferma i coperti con un tocco
 
 cliente che inquadra il QR
-   → si apre il menu sul telefono
-   → il pannello suggerisce il QR per entrare nel WiFi (una volta sola)
-   → dopo 30 secondi torna da solo al QR del menu
+   → si apre il menu sul telefono (la cassa conta quanti telefoni diversi)
+   → il pannello suggerisce il QR per entrare nel WiFi: 15 secondi, una volta sola
 
 cliente che ordina dal telefono
-   → l'ordine arriva alla dashboard cassa
-   → il pannello mostra "Ordine inviato in cucina" con la lista
+   → l'ordine arriva alla cassa, con "in attesa da x minuti"
+   → pannello: "Ordine inviato in cucina" con la lista, 15 secondi
+   → se nell'ordine non c'è vino: il vino abbinato, 30 secondi
+
+dalla cassa, in qualunque momento
+   → offerta del giorno o evento sul pannello, 15 secondi, col QR del menu
+   → "il conto": il pannello mostra il QR della recensione Google
 
 cameriere che preme "Il pasto è finito"
    → tutto si azzera, 5 secondi di pausa, si ricomincia
 ```
+
+Ogni schermata speciale torna da sola al QR del menu. Il tasto **MENU** del
+pannello ce lo riporta subito; il tasto **EXIT** fa partire una **demo a
+scorrimento** di tutte le schermate, 12 secondi l'una, che non dipende né dal
+nodo né dalla rete: è la riserva per la fiera.
 
 Il tavolo **si apre da solo ma non si chiude da solo**: al ristorante la gente
 si alza per andare in bagno, e uno schermo che torna a "prenotato" mentre
@@ -40,7 +48,8 @@ stanno mangiando sarebbe una figuraccia.
 | **HLK-LD2450** | radar 24 GHz che vede le persone | 5V + GND + TX al Freenove |
 | **Stick WS2812** | 8 LED, uno per coperto | 5V + GND + dato dal Freenove |
 | **CrowPanel 4.2"** | pannello e-ink 400×300 | alimentato e comandato dal Freenove |
-| **Mac** | server, dashboard cassa, pagina del menu | USB al Freenove |
+| **Mac** | ponte: rigira la seriale del nodo al server | USB al Freenove |
+| **iot.leggimenu.it** | server: cassa, menu, ordini, eventi | il Mac ci arriva via internet |
 
 Le due schede sono separate di proposito: il radar deve girare a 10 Hz senza
 mai fermarsi, e un refresh e-ink blocca la scheda per **3,1 secondi**. Sullo
@@ -79,35 +88,36 @@ sull'App Store non c'è).
 tengono. Se invece vuoi ricompilare, servono Arduino IDE, il core ESP32 e tre
 librerie: GxEPD2, Adafruit GFX, Adafruit NeoPixel.
 
-## I due Mac
+## Server, ponte e i due Mac
 
-Lo sviluppo si fa su una macchina sola; l'altra, quella che va in fiera, serve
-solo a far girare il progetto e non ha Arduino ne' strumenti di sviluppo.
-
-**Sul Mac di sviluppo**, dopo aver cambiato qualcosa:
+Il server sta su **iot.leggimenu.it** (cassa su `/cassa`, menu su `/menu/<tavolo>`).
+Il Freenove non ha WiFi: il Mac a cui è attaccato fa da **ponte**, legge la
+seriale e la rigira al server, e riporta indietro i comandi della cassa.
 
 ```bash
-git add -A && git commit -m "cosa ho cambiato" && git push
+export LEGGIMENU_SEGRETO='...'     # non è nel repository: lo dà Gianluca
+SERVER=wss://iot.leggimenu.it ./scripts/ponte.sh
 ```
 
-**Sul Mac della fiera**, per allinearsi:
+Due Mac, due ruoli:
+
+- **Mac di sviluppo** (Gianluca): si modifica il codice, si caricano i
+  firmware, si pubblica il server con `./scripts/pubblica.sh`, si fa
+  `git push`.
+- **Mac della fiera**: solo `git pull` e il ponte. Istruzioni passo passo in
+  [docs/MAC-FIERA.md](docs/MAC-FIERA.md).
+
+**Il firmware delle schede non viaggia con git pull.** Va caricato dal Mac di
+sviluppo prima di partire; `./scripts/versioni.sh` dice se le schede hanno
+l'ultima versione.
+
+## Il server sul Mac (senza internet)
+
+Il vecchio schema funziona ancora: server sul Mac, nodo sull'USB, niente
+ponte. Serve per provare in locale.
 
 ```bash
-./scripts/aggiorna.sh      # scarica, reinstalla se serve, riavvia il server
-./scripts/stato.sh         # dice cosa funziona e cosa manca
-```
-
-`stato.sh` e' pensato per quando non c'e' nessuno a cui chiedere: ogni riga
-dice se va o cosa fare.
-
-**Il firmware delle schede non si aggiorna cosi'.** Arduino sta solo sul Mac di
-sviluppo, quindi le schede vanno caricate **prima di partire**. Se durante la
-fiera serve una modifica al firmware, serve il Mac di sviluppo sul posto.
-
-## Uso quotidiano
-
-```bash
-./scripts/dashboard.sh avvia      # il server: http://localhost:8080
+./scripts/dashboard.sh avvia      # http://localhost:8080
 ./scripts/dashboard.sh stato
 ./scripts/dashboard.sh ferma
 
@@ -116,9 +126,9 @@ fiera serve una modifica al firmware, serve il Mac di sviluppo sul posto.
 ./scripts/scarica-log.sh          # scarica il registro dalla flash del nodo
 ```
 
-La porta seriale la può tenere **un processo solo**. Su macOS due processi
-possono aprirla senza errore e si dividono i byte: sembra un guasto del radar.
-Per questo esiste `con-nodo.sh`.
+La porta seriale la può tenere **un processo solo**: mai dashboard locale e
+ponte insieme. Su macOS due processi possono aprirla senza errore e si
+dividono i byte: sembra un guasto del radar.
 
 ## Il problema aperto
 
@@ -138,10 +148,13 @@ Le strade possibili sono in [CLAUDE.md](CLAUDE.md).
 
 ```
 firmware/radar_luce/     il nodo: radar, LED, stato del tavolo, registro a bordo
-firmware/pannello42/     il pannello e-ink 4.2"
-tools/radar_live.py      server: dashboard, pagina del menu, ordini
-tools/radar_live.html    la dashboard cassa
-backend/wine.py          abbinamento vino — scritto e non ancora collegato
-scripts/                 avvio, caricamento firmware, scarico registri
+firmware/pannello42/     il pannello e-ink 4.2": tutte le schermate e la demo
+tools/radar_live.py      server: cassa, menu, ordini, eventi, vino
+tools/cassa.html         la cassa del ristoratore (/cassa)
+tools/radar_live.html    la dashboard tecnica del radar (/)
+tools/ponte.py           il ponte nodo → server
+backend/wine.py          abbinamento vino
+scripts/                 ponte, pubblicazione, caricamento firmware, registri
+docs/                    hardware, server, Mac della fiera
 registrazioni/           prove sul campo, con etichetta
 ```

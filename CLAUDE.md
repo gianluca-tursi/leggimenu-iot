@@ -23,6 +23,25 @@ esptool --port /dev/cu.wchusbserial* chip_id
 
 Le due schede si alternano sulla stessa porta USB, e caricare il firmware
 sbagliato fallisce ma fa perdere un giro di cavi. Sono già stati tanti.
+`./scripts/flash.sh <cartella>` controlla il chip da solo prima di scrivere.
+
+**Tocca solo quello che chiede.** Se per fare una cosa ne va cambiata
+un'altra, anche "è la stessa riga", chiediglielo *prima*. Dopo ogni modifica
+guarda il diff e riprova il flusso intero, non solo il pezzo cambiato: lui
+prova tutto sull'hardware e le rotture le scopre da solo ("ma che fai, una
+cosa e ne rompi un'altra?"). È successo correggendo il vino: è sparita la
+schermata dell'ordine.
+
+**Due Mac.** Quello di sviluppo è di Gianluca: lì si modifica, si caricano i
+firmware, si pubblica il server. Quello della fiera fa solo `git pull` e il
+ponte, istruzioni in [docs/MAC-FIERA.md](docs/MAC-FIERA.md). Se sei sul Mac
+della fiera, il firmware non si carica da lì.
+
+**Segreti fuori dal repository**, che è pubblico: il segreto del ponte
+(`LEGGIMENU_SEGRETO`), la password della cassa (sul server in
+`dati/password.txt`), la password del WiFi (la scrive lui nella dashboard),
+`credenziali.h`, la chiave SSH `~/.ssh/leggimenu_tavolo`. Non scriverli in
+chat né in file versionati.
 
 ## Errori già fatti, da non rifare
 
@@ -62,7 +81,31 @@ shell chiamante. Per questo la dashboard usa un file di PID
 
 **Due dashboard insieme.** Su macOS due processi aprono la stessa seriale senza
 errore e si dividono i byte: nessun frame arriva intero e sembra il radar
-rotto. Ora `dashboard.sh` lo impedisce.
+rotto. Ora `dashboard.sh` lo impedisce. Vale anche per dashboard locale e
+ponte: mai insieme.
+
+**Troncare i byte invece del testo.** Il server faceva `.encode()[:40]` su
+una riga già con il `\n` in fondo: il taglio mangiava l'a capo e la riga
+dopo si incollava ("...struttY"), e il vino non compariva mai. Si accorcia
+il testo con `accorcia()`, a parole intere, poi si codifica.
+
+**Buffer di riga troppo corti.** Il pannello leggeva le righe dal nodo con
+64 caratteri, e l'annuncio arriva su una riga sola (`D:titolo|riga1|riga2`):
+la coda spariva ("inquadra il QR per" e basta). Ora sono 128. Il nodo ne
+accetta 79 (`cmdBuf[80]`): `al_pannello()` sul server calcola lo spazio
+rimasto. Se allunghi un comando, controlla tutti e due i buffer.
+
+**L'ultima schermata arrivata vince.** Il pannello ridisegna al massimo ogni
+4 secondi e disegna l'ultima richiesta: il vino, che arriva un decimo di
+secondo dopo l'ordine, cancellava l'ordine. Il vino ora aspetta
+(`vinoInAttesa`). Stessa trappola col battito del nodo: `T:<n>` ogni 15 s
+sovrascriveva una schermata speciale chiesta ma non ancora disegnata. Se
+aggiungi una schermata, pensa a cosa succede se arriva un altro comando nei
+4 secondi prima del disegno.
+
+**Prova al banco contaminata.** Con la CrowPanel sull'USB per caricarla, il
+nodo può restare acceso attraverso il filo dati e continua a mandare `*L`
+ogni 15 secondi: il pannello torna a "libero" da solo e sembra un bug.
 
 ## Il metodo che funziona
 
@@ -107,35 +150,73 @@ Il gestionale cassa (`/cassa`) e' il primo pezzo di una cosa piu' grande. Nella
 testa sua, alla fine il tavolo dovra' anche:
 
 - **promuovere eventi futuri** nelle giornate scarse, sul pannello a tavolo
-  libero o a fine pasto
+  libero o a fine pasto - offerte ed eventi si mandano dalla cassa
 - **misurare i tempi di gestione del tavolo** - quanto si aspetta prima di
   ordinare, quanto dura il servizio. La durata gia' si registra alla
   liberazione, manca lo storico fra un servizio e l'altro
-- **QR della recensione Google** a fine tavolo
+- **QR della recensione Google** a fine tavolo - fatto, parte col conto
 - **QR per pagare il conto** a fine pasto
 - **quanti telefoni** hanno inquadrato il QR a quel tavolo - gia' fatto, si
   contano i dispositivi distinti con un cookie
 - **abbinamento del vino dopo il primo ordine**, ma solo se il vino non c'e'
-  gia' nell'ordine e solo se ha senso proporlo. `backend/wine.py` fa gia' i
-  conti, manca il collegamento e la regola del "ha senso"
+  gia' nell'ordine - fatto, con `backend/wine.py`. Manca ancora una regola
+  migliore del "ha senso proporlo"
+
+## Server e ponte
+
+Il server gira su **iot.leggimenu.it** (gunicorn, 1 worker, dietro
+Cloudflare). Si pubblica dal Mac di sviluppo con `./scripts/pubblica.sh`:
+copia i file e tocca `RICARICA`, il server si ricarica da solo senza root.
+I dati del gestore (eventi, immagini, password) stanno sul server in
+`dati/`, fuori dal repository.
+
+Il Freenove non ha WiFi: `scripts/ponte.sh` sul Mac a cui è attaccato legge
+la seriale e la rigira al server su `/ws/nodo`, con il segreto condiviso.
+Il server, ricevuto il ponte, lo tratta come una seriale locale (`Ponte` in
+`radar_live.py`): stesse righe, stessi comandi.
+
+## Le schermate del pannello
+
+| schermata | quando | quanto resta |
+|---|---|---|
+| tavolo prenotato | `L` | finché non si apre |
+| benvenuto + QR menu | `T:<n>` | sempre: è quella di ritorno |
+| WiFi | primo QR inquadrato | 15 s |
+| ordine inviato | `Z` `V:` `X` | 15 s |
+| vino | `B:` `C:` `Y` dopo l'ordine, solo se non c'è vino | 30 s, dopo l'ordine |
+| offerta / evento | `D:titolo\|riga1\|riga2` | 15 s |
+| recensione | `E` (il conto) | finché qualcuno non la toglie |
+
+Le durate sono costanti in cima a `pannello42.ino`. **MENU** rimette il QR
+del menu. **EXIT** avvia la demo a scorrimento: tutte le schermate, 12 s
+l'una, in loop, con contenuti scritti nel firmware; i dati veri vengono messi
+da parte e rimessi, e i comandi che arrivano intanto si registrano.
+
+I testi lunghi vanno a capo misurando i pixel (`dueRighe`, `stringiA`),
+mai contando i caratteri: contandoli finivano fuori dallo schermo.
 
 ## Cosa manca
 
-- **Abbinamento del vino**: `backend/wine.py` è scritto e collaudato ma non è
-  mai stato collegato. Ora che gli ordini arrivano, ha finalmente i dati.
-- **WiFi sul pannello**: oggi il server parla col nodo via USB, quindi sul
-  power bank la dashboard è cieca. Il CrowPanel ha il WiFi mai acceso: diventa
-  lui il ponte verso il server, e il nodo resta sul filo che c'è già.
-- **Deploy su Fly.io**: previsto fin dall'inizio, rimandato finché il nodo non
-  parla in rete.
+- **Il radar non vede più nessuno** (`[grezzi] nessun bersaglio`): da
+  controllare orientamento, ostacoli davanti, 5V. Intanto la cassa ha
+  "Apri il tavolo a mano".
+- **URL della recensione**: è un segnaposto (`trattoria-demo`), va messo
+  quello vero dalla dashboard.
+- **QR per pagare il conto** e **storico dei tempi** fra un servizio e
+  l'altro: non ancora fatti.
+- **`aggiorna.sh` e `stato.sh`** sono scritti per il vecchio schema col
+  server sul Mac: `aggiorna.sh` avvia la dashboard locale, che col ponte
+  litiga per la seriale. Sul Mac della fiera si usa `git pull`.
+- **WiFi sul pannello**: oggi il nodo arriva al server solo via USB e Mac.
+  Il CrowPanel ha il WiFi mai acceso: potrebbe diventare lui il ponte.
 - **Filo di ritorno pannello → nodo** (IO17 → 26): rotto, da ricontrollare.
   Ci passa solo la diagnostica, il funzionamento non ne dipende.
 - **Modalità fiera**: alla Maker Faire la folla attorno allo stand apre il
   tavolo in continuazione. Serve una portata più corta o un'apertura diversa,
   e va provata prima, non lì.
-- **L'indirizzo del QR**: punta all'IP del Mac, che cambia quando il router lo
-  riassegna. Sull'altro Mac sarà diverso. Va ripremuto "Aggiorna i QR" ogni
-  volta — da risolvere alla radice con un nome fisso o il server su Fly.
+- **L'indirizzo del QR**: con il server su iot.leggimenu.it l'indirizzo è
+  fisso; si imposta una volta dalla dashboard e il pannello lo tiene in
+  memoria. Se il QR porta a un IP, è rimasto quello vecchio.
 
 ## Dettagli che servono e non si deducono
 
@@ -160,7 +241,10 @@ comandi anche dall'USB, per provare le schermate senza rimontare il filo.
 
 **Protocollo nodo ↔ pannello** (righe di testo, leggibili con un monitor):
 `T:<n>` coperti, `L` libero, `W` schermata WiFi, `Z`/`V:<riga>`/`X` ordine,
-`N:` `O:` `G:` `U:` `Q:` prenotazione e QR, `?` ping.
+`B:<nome>`/`C:<motivo>`/`Y` vino, `D:titolo|riga1|riga2` annuncio,
+`E:<url>`/`E` recensione, `N:` `O:` `G:` `U:` `Q:` prenotazione e QR,
+`Q` rimetti il QR del menu, `?` ping.
 Sul nodo, da seriale: `R` ritara, `F` libera il tavolo, `P` ping, `S` stato,
-`L` scarica il registro, `C` cancella, `M` segnalibro, `A:<secondi>` pausa.
+`L` scarica il registro, `C` cancella, `M` segnalibro, `A:<secondi>` pausa,
+`K:<n>` coperti decisi dalla cassa.
 **Ogni comando è una riga.** C'era un parser misto e mangiava mezzo comando.
