@@ -104,7 +104,8 @@ Due Mac, due ruoli:
 - **Mac di sviluppo** (Gianluca): si modifica il codice, si caricano i
   firmware, si pubblica il server con `./scripts/pubblica.sh`, si fa
   `git push`.
-- **Mac della fiera**: solo `git pull` e il ponte. Istruzioni passo passo in
+- **Mac della fiera**: solo `./scripts/aggiorna.sh` e il ponte;
+  `./scripts/stato.sh` dice se nodo, ponte e server vanno. Istruzioni passo passo in
   [docs/MAC-FIERA.md](docs/MAC-FIERA.md).
 
 **Il firmware delle schede non viaggia con git pull.** Va caricato dal Mac di

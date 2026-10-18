@@ -12,7 +12,7 @@ radar + LED + pannello            questo Mac                 iot.leggimenu.it
 ```
 
 Lo sviluppo, firmware compreso, si fa sull'altro Mac, quello di Gianluca.
-Qui si scaricano solo le novità.
+Qui si scaricano solo le novità, con `./scripts/aggiorna.sh`.
 
 ## Una volta sola
 
@@ -38,7 +38,7 @@ repository su GitHub è pubblico.
 2. Nel Terminale, dentro la cartella del progetto:
 
 ```bash
-git pull
+./scripts/aggiorna.sh
 ```
 
 ```bash
@@ -60,6 +60,14 @@ ponte leggimenu · server: wss://iot.leggimenu.it
 3. Dal telefono o dal browser: **https://iot.leggimenu.it/cassa**. La password
    della cassa te la dà Gianluca, come il segreto.
 
+Per controllare che sia tutto a posto, in un altro Terminale:
+
+```bash
+./scripts/stato.sh
+```
+
+Dice riga per riga se vanno il nodo, il ponte e il server, e cosa fare se no.
+
 Il ponte tiene sveglio il Mac da solo (`caffeinate`). Se cade la rete o si
 stacca il cavo riprova ogni 30 secondi: non serve riavviarlo a mano.
 
@@ -69,10 +77,6 @@ stacca il cavo riprova ogni 30 secondi: non serve riavviarlo a mano.
   gira il ponte. Aprirebbero tutti e due la stessa porta seriale, e su macOS
   due processi si dividono i byte senza dare errore: nessun frame arriva intero
   e sembra il radar rotto.
-- **Non usare `aggiorna.sh` e non prendere sul serio `stato.sh`** quando
-  parlano di server e QR: sono scritti per il vecchio schema, col server su
-  questo Mac, e `aggiorna.sh` alla fine avvia proprio la dashboard locale.
-  Per allinearsi basta `git pull`.
 - **Non caricare firmware.** Le schede si caricano dal Mac di sviluppo prima
   di partire.
 - **Mai l'USB nella CrowPanel mentre il filo 3V3 è collegato**: due

@@ -20,6 +20,9 @@ echo
 echo "  1. il driver della seriale CH340, altrimenti il Mac non vede le schede:"
 echo "     https://github.com/WCHSoftGroup/ch34xser_macos  (CH34xVCPDriver, .dmg)"
 echo
-echo "  2. attacca il Freenove via USB, poi:"
-echo "     ./scripts/dashboard.sh avvia"
+echo "  2. attacca il Freenove via USB e avvia il ponte (il segreto te lo da' Gianluca):"
+echo "     export LEGGIMENU_SEGRETO='...'"
+echo "     SERVER=wss://iot.leggimenu.it ./scripts/ponte.sh"
+echo
+echo "  Poi ./scripts/stato.sh dice se e' tutto a posto."
 echo

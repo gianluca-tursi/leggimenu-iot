@@ -33,8 +33,8 @@ cosa e ne rompi un'altra?"). È successo correggendo il vino: è sparita la
 schermata dell'ordine.
 
 **Due Mac.** Quello di sviluppo è di Gianluca: lì si modifica, si caricano i
-firmware, si pubblica il server. Quello della fiera fa solo `git pull` e il
-ponte, istruzioni in [docs/MAC-FIERA.md](docs/MAC-FIERA.md). Se sei sul Mac
+firmware, si pubblica il server. Quello della fiera fa solo `./scripts/aggiorna.sh`
+e il ponte, istruzioni in [docs/MAC-FIERA.md](docs/MAC-FIERA.md). Se sei sul Mac
 della fiera, il firmware non si carica da lì.
 
 **Segreti fuori dal repository**, che è pubblico: il segreto del ponte
@@ -204,9 +204,6 @@ mai contando i caratteri: contandoli finivano fuori dallo schermo.
   quello vero dalla dashboard.
 - **QR per pagare il conto** e **storico dei tempi** fra un servizio e
   l'altro: non ancora fatti.
-- **`aggiorna.sh` e `stato.sh`** sono scritti per il vecchio schema col
-  server sul Mac: `aggiorna.sh` avvia la dashboard locale, che col ponte
-  litiga per la seriale. Sul Mac della fiera si usa `git pull`.
 - **WiFi sul pannello**: oggi il nodo arriva al server solo via USB e Mac.
   Il CrowPanel ha il WiFi mai acceso: potrebbe diventare lui il ponte.
 - **Filo di ritorno pannello → nodo** (IO17 → 26): rotto, da ricontrollare.
