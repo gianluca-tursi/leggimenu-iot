@@ -145,7 +145,7 @@ static const int NIENTE        = -1;   // nessuna richiesta in sospeso
 // L'ordine arrivato dal telefono. Otto righe bastano per un tavolo: se ne
 // ordinano di piu' le ultime non si vedrebbero comunque sullo schermo.
 static const int MAX_RIGHE = 8;
-char ordine[MAX_RIGHE][28];
+char ordine[MAX_RIGHE][52];   // fino a due righe per piatto
 int  nOrdine = 0;
 
 // Da che parte stanno i tasti fisici rispetto allo schermo in verticale.
@@ -272,6 +272,8 @@ static void schermoWifi() {
   centrata("nel WiFi del locale",  &FreeMono12pt7b, 386);
 }
 
+static void stringiA(char *s, int largo);
+
 static void schermoOrdine() {
   centrata("Ordine inviato", &FreeMonoBold18pt7b, 52);
   centrata("in cucina",      &FreeMonoBold18pt7b, 88);
@@ -279,27 +281,53 @@ static void schermoOrdine() {
 
   int y = 140;
   epd.setFont(&FreeMono9pt7b);
+  const int largo  = epd.width() - 12 - 24;
+  const int rientro = 33;                    // la seconda riga parte dopo "2x "
   for (int i = 0; i < nOrdine && y < 320; i++) {
-    // Accorcio finche' ci sta davvero, misurando: contare i caratteri a mano
-    // e' quello che ha fatto finire "cinghiale" tagliato a meta' sulla riga
-    // successiva.
-    char riga[32];
-    snprintf(riga, sizeof(riga), "%s", ordine[i]);
+    // Un piatto lungo va a capo una volta, all'ultimo spazio che ci sta;
+    // se non basta, e' la seconda riga a essere troncata. Misuro sempre:
+    // contare i caratteri a mano aveva fatto finire "cinghiale" a meta'.
+    char a[56], b[56] = "";
+    snprintf(a, sizeof(a), "%s", ordine[i]);
     int16_t bx, by; uint16_t bw, bh;
-    while (strlen(riga) > 3) {
-      epd.getTextBounds(riga, 0, y, &bx, &by, &bw, &bh);
-      if (24 + (int)bw <= epd.width() - 12) break;
-      riga[strlen(riga) - 1] = 0;
+    epd.getTextBounds(a, 0, y, &bx, &by, &bw, &bh);
+    if ((int)bw > largo && y + 20 < 320) {
+      for (int k = strlen(a) - 1; k > 0; k--) {
+        if (a[k] != ' ') continue;
+        a[k] = 0;
+        epd.getTextBounds(a, 0, y, &bx, &by, &bw, &bh);
+        if ((int)bw <= largo) { snprintf(b, sizeof(b), "%s", a + k + 1); break; }
+        a[k] = ' ';
+      }
     }
+    stringiA(a, largo);
     epd.setCursor(24, y);
-    epd.print(riga);
-    y += 26;
+    epd.print(a);
+    if (b[0]) {
+      stringiA(b, largo - rientro);
+      epd.setCursor(24 + rientro, y + 20);
+      epd.print(b);
+      y += 46;
+    } else {
+      y += 26;
+    }
   }
   if (!nOrdine) centrata("(nessuna portata)", &FreeMono9pt7b, 160);
 
   epd.drawFastHLine(30, 332, epd.width() - 60, GxEPD_BLACK);
-  centrata("premi MENU per",    &FreeMono12pt7b, 362);
-  centrata("tornare al codice", &FreeMono12pt7b, 388);
+  // Le righe stanno di fianco alla freccia, non sotto: in 12pt "per tornare
+  // al menu" e' larga quasi quanto lo schermo, e centrata ci finirebbe sopra.
+  const char *dici[2] = { "premi questo tasto", "per tornare al menu" };
+  const int da = TASTI_A_DESTRA ? 4 : 30, fino = TASTI_A_DESTRA ? 270 : 296;
+  epd.setFont(&FreeMono12pt7b);
+  for (int k = 0; k < 2; k++) {
+    int16_t bx, by; uint16_t bw, bh;
+    epd.getTextBounds(dici[k], 0, 0, &bx, &by, &bw, &bh);
+    int x = da + (fino - da - (int)bw) / 2;
+    if (x < da) x = da;
+    epd.setCursor(x, k ? 388 : 362);
+    epd.print(dici[k]);
+  }
 
   // La freccia punta al tasto fisico: lo schermo non e' touch, quindi
   // "clicca qui" non esiste e indicare il pulsante e' l'unica cosa onesta.
@@ -309,6 +337,19 @@ static void schermoOrdine() {
                      epd.width() - 26, y0 + 11, GxEPD_BLACK);
   } else {
     epd.fillTriangle(8, y0, 26, y0 - 11, 26, y0 + 11, GxEPD_BLACK);
+  }
+}
+
+/* Accorcia <s> a parole intere finche' sta in <largo> px col font attuale.
+   Una parola sola troppo lunga la accorcia a lettere: non c'e' altro modo. */
+static void stringiA(char *s, int largo) {
+  int16_t bx, by; uint16_t bw, bh;
+  while (strlen(s) > 1) {
+    epd.getTextBounds(s, 0, 100, &bx, &by, &bw, &bh);
+    if ((int)bw <= largo) return;
+    char *sp = strrchr(s, ' ');
+    if (sp && sp != s) *sp = 0;
+    else s[strlen(s) - 1] = 0;
   }
 }
 
@@ -335,7 +376,21 @@ static void dueRighe(const char *testo, int /*non usato*/, int y1, int y2,
   }
   if (taglio <= 1) { centrata(testo, font, y1); return; }   // una parola sola
   centrata(a, font, y1);
-  centrata(testo + taglio + 1, font, y2);
+  // La seconda riga, se ancora non ci sta, perde le parole in fondo: meglio
+  // "Valpolicella" intero che "Valpolicella D" tagliato dal bordo.
+  char b[64];
+  snprintf(b, sizeof(b), "%s", testo + taglio + 1);
+  stringiA(b, utile);
+  centrata(b, font, y2);
+}
+
+/* Una riga dell'annuncio: in 12pt se ci sta, se no a capo in 9pt. */
+static void rigaAnnuncio(const char *testo, int y) {
+  int16_t bx, by; uint16_t bw, bh;
+  epd.setFont(&FreeMono12pt7b);
+  epd.getTextBounds(testo, 0, y, &bx, &by, &bw, &bh);
+  if ((int)bw <= epd.width() - 16) centrata(testo, &FreeMono12pt7b, y);
+  else dueRighe(testo, 0, y - 6, y + 12, &FreeMono9pt7b);
 }
 
 static void schermoVino() {
@@ -354,8 +409,8 @@ static void schermoVino() {
 static void schermoAnnuncio() {
   dueRighe(annTitolo, 13, 70, 112, &FreeMonoBold18pt7b);
   epd.drawFastHLine(50, 146, epd.width() - 100, GxEPD_BLACK);
-  if (annRiga1[0]) centrata(annRiga1, &FreeMono12pt7b, 188);
-  if (annRiga2[0]) centrata(annRiga2, &FreeMono12pt7b, 218);
+  if (annRiga1[0]) rigaAnnuncio(annRiga1, 188);
+  if (annRiga2[0]) rigaAnnuncio(annRiga2, 218);
 
   // Il QR resta: l'annuncio e' un richiamo, il menu e' quello che serve.
   disegnaQR(URL_MENU, 246, 130);
@@ -371,7 +426,8 @@ static void schermoRecensione() {
   centrata("ci aiuta davvero",        &FreeMono9pt7b, 378);
 }
 
-static void disegna(int coperti) {
+/* Solo il disegno, senza toccare lo stato: lo usa anche la demo. */
+static void stampa(int coperti) {
   epd.setRotation(1);                       // 400x300 -> 300x400, verticale
   epd.setTextColor(GxEPD_BLACK);
   // Niente a capo automatico: una riga troppo lunga finirebbe sopra quella
@@ -390,12 +446,72 @@ static void disegna(int coperti) {
     else                        schermoLibero();
   } while (epd.nextPage());
   epd.hibernate();
+}
 
+static void disegna(int coperti) {
+  stampa(coperti);
   copertiMostrati = coperti;
   specialeDa = eSpeciale(coperti) ? millis() : 0;
   forzaRidisegno = false;
   ultimoDisegno = millis();
   Serial.printf("[pannello] disegnato: %d coperti\n", coperti);
+}
+
+// --- demo a scorrimento -------------------------------------------------
+// Il tasto EXIT fa girare tutte le schermate una dopo l'altra, con contenuti
+// scritti qui. Non dipende da nodo, ponte o server: se in fiera salta la
+// rete, il tavolo si puo' mostrare lo stesso. Si esce con EXIT o con MENU.
+// Intanto i comandi veri continuano ad arrivare e a essere registrati: alla
+// fine della demo il pannello torna a quello che deve mostrare davvero.
+static const int      PIN_DEMO     = 1;        // EXIT
+static const uint32_t DEMO_OGNI_MS = 12000;    // quanto resta ogni schermata
+static const int DEMO_PASSI[] = { 0, 1, MOSTRA_WIFI, MOSTRA_ORDINE, MOSTRA_VINO,
+                                  MOSTRA_ANNUNCIO, MOSTRA_ANNUNCIO,
+                                  MOSTRA_RECENSIONE };
+static const int N_DEMO = sizeof(DEMO_PASSI) / sizeof(DEMO_PASSI[0]);
+bool     demoAttiva = false;
+int      demoPasso  = 0;
+uint32_t demoDa     = 0;       // 0 = la prima schermata non e' ancora uscita
+
+static void disegnaDemo(int passo) {
+  // Metto da parte i dati veri, disegno con quelli finti e li rimetto:
+  // un ordine arrivato durante la demo non deve sparire.
+  static char sOrd[MAX_RIGHE][52];
+  static char sVN[40], sVM[40], sAT[32], sA1[34], sA2[34], sQW[80];
+  int sN = nOrdine;
+  memcpy(sOrd, ordine, sizeof(ordine));
+  memcpy(sVN, vinoNome, sizeof(sVN));   memcpy(sVM, vinoMotivo, sizeof(sVM));
+  memcpy(sAT, annTitolo, sizeof(sAT));  memcpy(sA1, annRiga1, sizeof(sA1));
+  memcpy(sA2, annRiga2, sizeof(sA2));   memcpy(sQW, QR_WIFI, sizeof(sQW));
+
+  nOrdine = 3;
+  snprintf(ordine[0], sizeof(ordine[0]), "2x Tagliatelle al ragu di cinghiale");
+  snprintf(ordine[1], sizeof(ordine[1]), "1x Carciofi alla romana");
+  snprintf(ordine[2], sizeof(ordine[2]), "2x Tiramisu della casa");
+  snprintf(vinoNome,   sizeof(vinoNome),   "Amarone della Valpolicella DOCG");
+  snprintf(vinoMotivo, sizeof(vinoMotivo), "Regge il ragu di cinghiale");
+  if (!QR_WIFI[0])
+    snprintf(QR_WIFI, sizeof(QR_WIFI), "WIFI:T:WPA;S:leggimenu;P:demo-leggimenu;;");
+  if (passo == 5) {                                    // l'offerta
+    snprintf(annTitolo, sizeof(annTitolo), "Offerta del giorno");
+    snprintf(annRiga1,  sizeof(annRiga1),  "Tiramisu della casa");
+    snprintf(annRiga2,  sizeof(annRiga2),  "%s", "-20% solo oggi");  // % e' un segnaposto
+  } else {                                             // l'evento
+    snprintf(annTitolo, sizeof(annTitolo), "Serata degustazione");
+    snprintf(annRiga1,  sizeof(annRiga1),  "venerdi ore 20:30");
+    snprintf(annRiga2,  sizeof(annRiga2),  "inquadra il QR per i dettagli");
+  }
+
+  stampa(DEMO_PASSI[passo]);
+
+  nOrdine = sN;
+  memcpy(ordine, sOrd, sizeof(ordine));
+  memcpy(vinoNome, sVN, sizeof(sVN));   memcpy(vinoMotivo, sVM, sizeof(sVM));
+  memcpy(annTitolo, sAT, sizeof(sAT));  memcpy(annRiga1, sA1, sizeof(sA1));
+  memcpy(annRiga2, sA2, sizeof(sA2));   memcpy(QR_WIFI, sQW, sizeof(sQW));
+
+  ultimoDisegno = millis();
+  Serial.printf("[demo] schermata %d di %d\n", passo + 1, N_DEMO);
 }
 
 /* Una riga arrivata dal nodo radar. */
@@ -557,7 +673,9 @@ void setup() {
 }
 
 void loop() {
-  static char riga[64];
+  // 128: l'annuncio arriva tutto su una riga sola (titolo|riga1|riga2), e
+  // con 64 la coda si perdeva: "inquadra il QR per" e poi niente.
+  static char riga[128];
   static size_t n = 0;
 
   // Gli stessi comandi arrivano anche dall'USB: serve per provare le
@@ -588,7 +706,15 @@ void loop() {
       if (giu && !tastoGiu[i]) {
         ultimoTasto = millis();
         Serial.printf("[tasto] IO%d premuto\n", TASTI[i]);
+        if (TASTI[i] == PIN_DEMO) {
+          demoAttiva = !demoAttiva;
+          demoPasso = 0; demoDa = 0;
+          if (!demoAttiva) forzaRidisegno = true;   // torno a quello vero
+          Serial.println(demoAttiva ? "[tasto] EXIT: parte la demo"
+                                    : "[tasto] EXIT: fine demo");
+        }
         if (TASTI[i] == PIN_MENU) {
+          demoAttiva = false;                           // MENU chiude anche la demo
           specialeDa = 0;                               // annullo l'attesa
           vinoInAttesa = false;
           // Se sto mostrando una schermata speciale, copertiMostrati e' un
@@ -603,6 +729,19 @@ void loop() {
       }
       tastoGiu[i] = giu;
     }
+  }
+
+  // In demo comanda la demo: niente scadenze, niente ridisegni veri.
+  // demoDa parte DOPO il disegno, cosi' ogni schermata si vede 12 s pieni.
+  if (demoAttiva) {
+    bool tocca = demoDa ? millis() - demoDa >= DEMO_OGNI_MS
+                        : millis() - ultimoDisegno > MIN_FRA_DISEGNI_MS;
+    if (tocca) {
+      if (demoDa) demoPasso = (demoPasso + 1) % N_DEMO;
+      disegnaDemo(demoPasso);
+      demoDa = millis();
+    }
+    return;
   }
 
   // Ridisegno solo se e' cambiato davvero e non troppo di frequente.

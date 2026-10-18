@@ -173,7 +173,11 @@ async def al_pannello(titolo: str, riga1: str = "", riga2: str = "") -> bool:
         return False
     # Una riga sola: cosi' non puo' restare mezzo annuncio vecchio sotto il
     # titolo nuovo se un pezzo si perde per strada.
-    pezzi = [accorcia(titolo, 22), accorcia(riga1, 26), accorcia(riga2, 26)]
+    # Il nodo accetta righe fino a 79 caratteri: l'ultima riga prende lo
+    # spazio che resta (al massimo 33, quanto tiene il pannello). Con 26 fissi
+    # "inquadra il QR per i dettagli" arrivava mozzata.
+    t, r1 = accorcia(titolo, 22), accorcia(riga1, 26)
+    pezzi = [t, r1, accorcia(riga2, min(33, 75 - len(t) - len(r1)))]
     try:
         seriale_aperta[0].write(("D:" + "|".join(p.replace("|", " ") for p in pezzi)
                                  + "\n").encode())
@@ -904,7 +908,8 @@ async def ordine(dati: dict):
             time.sleep(0.05)
             for r in righe[:8]:
                 q = int(r.get("qta", 1))
-                testo = accorcia(f"{q}x {r.get('nome','')}", 24)
+                # 48: sul pannello un piatto lungo va a capo su due righe
+                testo = accorcia(f"{q}x {r.get('nome','')}", 48)
                 seriale_aperta[0].write(f"V:{testo}\n".encode())
                 time.sleep(0.05)
             seriale_aperta[0].write(b"X\n")          # mostra la schermata
