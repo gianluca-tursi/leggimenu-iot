@@ -421,8 +421,14 @@ static void comando(const char *r) {
     // la spazzerebbe via a meta': il WiFi durava 15 secondi invece di 30 e
     // l'ordine spariva da solo. Qui me lo segno e basta; ci torno a tempo
     // scaduto. La 'L' invece passa sempre: il tavolo liberato e' un fatto.
-    if (eSpeciale(copertiMostrati)) copertiDopo = (n > 0) ? n : 1;
-    else                            copertiChiesti = n;
+    // Anche se la speciale e' solo IN ARRIVO (chiesta, non ancora disegnata):
+    // il pannello ridisegna al massimo ogni 4 secondi, e se la ripetizione
+    // dello stato cade in quella finestra cancellava l'ordine prima che
+    // comparisse - lasciando il vino ad aspettare un ordine mai mostrato.
+    if (eSpeciale(copertiMostrati) || eSpeciale(copertiChiesti))
+      copertiDopo = (n > 0) ? n : 1;
+    else
+      copertiChiesti = n;
   } else if (r[0] == 'L' && r[1] == 0) {
     vinoInAttesa = false;                        // tavolo liberato: niente vino
     copertiChiesti = 0;
